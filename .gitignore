@@ -1,0 +1,9 @@
+node_modules/
+__pycache__/
+venv/
+env/
+.env
+*.db
+*.sqlite3
+/images/
+/records/
