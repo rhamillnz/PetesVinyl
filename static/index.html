@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pete's Vinyl</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='%23111'/><circle cx='50' cy='50' r='18' fill='%23e8322b'/><circle cx='50' cy='50' r='3' fill='%23fff'/></svg>">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header class="jukebox-top">
+    <div class="bubble-tube" aria-hidden="true"></div>
+    <div class="top-inner">
+      <a class="logo" href="#/" aria-label="Home">
+        <span class="logo-disc" aria-hidden="true"></span>
+        <span class="logo-text">Pete's Vinyl</span>
+      </a>
+      <div class="stats" id="stats"></div>
+      <div class="top-buttons">
+        <button class="btn btn-chrome" id="backupBtn" title="Copy everything to Google Drive">
+          <span class="dot" id="backupDot"></span> Back Up
+        </button>
+        <a class="btn btn-chrome btn-small" href="#/settings" title="Settings">⚙️</a>
+      </div>
+    </div>
+  </header>
+
+  <main id="app" tabindex="-1"></main>
+
+  <div id="modal" class="modal" hidden>
+    <div class="modal-box" role="dialog" aria-modal="true" id="modalBox"></div>
+  </div>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
