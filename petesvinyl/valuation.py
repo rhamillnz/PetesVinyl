@@ -116,7 +116,9 @@ async def estimate(record: dict[str, Any]) -> dict[str, Any]:
 
     ai_value = None
     ai_reason = ""
-    if ai.is_configured() and query.strip():
+    # The AI web search costs real money (about 2c a time), so only use it when Discogs and eBay
+    # gave us nothing to go on.
+    if ai.is_configured() and query.strip() and not sources:
         try:
             res = await ai.research_value(record)
             typical = res.get("typical_price") or {}

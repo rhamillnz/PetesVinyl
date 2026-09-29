@@ -54,6 +54,7 @@ async def chat_json(content: list[dict[str, Any]], web_search: bool = False, max
         "messages": [{"role": "user", "content": content}],
         "max_tokens": max_tokens,
         "temperature": 0.1,
+        "usage": {"include": True},  # ask OpenRouter to report what this call cost
     }
     if web_search and config.get_bool("AI_WEB_SEARCH"):
         body["plugins"] = [{"id": "web", "max_results": 5}]
@@ -82,7 +83,9 @@ async def chat_json(content: list[dict[str, Any]], web_search: bool = False, max
         text = data["choices"][0]["message"]["content"] or ""
     except (KeyError, IndexError) as exc:
         raise AIUnavailable(f"Unexpected OpenRouter reply: {str(data)[:300]}") from exc
-    activity.record("OpenRouter", what, True, f"Reply: {text.strip()[:1200]}")
+    cost = (data.get("usage") or {}).get("cost")
+    cost_txt = f"Cost: ${cost:.4f}. " if isinstance(cost, (int, float)) else ""
+    activity.record("OpenRouter", what, True, f"{cost_txt}Reply: {text.strip()[:1200]}")
     try:
         return extract_json(text)
     except ValueError:
