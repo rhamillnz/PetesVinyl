@@ -523,3 +523,6 @@ body {
 .backup-table th { text-align: left; color: var(--text-dim); padding: 6px 10px; border-bottom: 2px solid #6b3a22; }
 .backup-table td { padding: 10px; vertical-align: top; border-bottom: 1px solid rgba(255, 255, 255, .1); }
 .backup-table tr.bad td { background: rgba(230, 58, 46, .14); }
+
+.restart-banner { position: sticky; top: 0; z-index: 40; background: var(--red-deep); color: #fff; text-align: center;
+  padding: 14px 20px; font-size: 1.1rem; border-bottom: 4px solid #fff; }

@@ -23,7 +23,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from petesvinyl import activity, ai, backup, config, db, discogs, listings, publishers, valuation
+from petesvinyl import version, activity, ai, backup, config, db, discogs, listings, publishers, valuation
 from petesvinyl.config import IMAGES_DIR, STATIC_DIR
 from petesvinyl.db import IMAGE_SLOTS, PLATFORMS
 
@@ -186,6 +186,12 @@ def _image_files(rec: dict[str, Any]) -> dict[str, Path]:
 
 
 # --------------------------------------------------------------------------- records
+@app.get("/api/version")
+def app_version() -> dict[str, Any]:
+    on_disk = version.code_fingerprint()
+    return {"running": version.STARTED_WITH, "on_disk": on_disk, "stale": on_disk != version.STARTED_WITH}
+
+
 @app.get("/api/health")
 def health() -> dict[str, Any]:
     return {

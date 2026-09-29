@@ -131,3 +131,14 @@ Interactive API docs are at <http://localhost:8000/docs>.
 - The TradeMe and eBay API publishers follow the documented APIs but haven't been run against live accounts. Try them in sandbox mode first. Any failure falls back to the copy-and-paste helper, so nothing is lost.
 - eBay often blocks the sold-listings scrape. When that happens, the AI's web research supplies the eBay figures instead.
 - The server only listens on `127.0.0.1`, so nobody else on the network can reach it. API keys are stored in the local database and `.env`, and the database is copied into Pete's own Google Drive by the backup.
+
+---
+
+## Updating, and "the app needs a restart"
+
+After updating the code (`git pull origin main`), just double-click **Pete's Vinyl** on the desktop again.
+The launcher compares the code on disk with the code the running copy started with, and if they differ it
+restarts the app automatically. If a page ever shows **"Not Found"** or a red *"needs a restart"* bar, the
+running copy is older than the files on disk: run `Stop_PetesVinyl.bat`, then start the app again.
+(If it was started as Administrator, a normal launch cannot stop it. Stop it once from an Administrator
+PowerShell, then always start it normally.)

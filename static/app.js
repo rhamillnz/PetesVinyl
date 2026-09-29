@@ -206,7 +206,11 @@ async function route() {
     }
     return await renderHome();
   } catch (e) {
-    app.innerHTML = `<div class="panel"><h2>Oops, something went wrong</h2><p>${esc(e.message)}</p><a class="btn" href="#/">Back to my records</a></div>`;
+    if (e.message === "Not Found") showRestartBanner();
+    const stale = e.message === "Not Found"
+      ? "This page needs a newer version of the app than the one that's running. Please restart Pete's Vinyl (see the message at the top)."
+      : e.message;
+    app.innerHTML = `<div class="panel"><h2>Oops, something went wrong</h2><p>${esc(stale)}</p><a class="btn" href="#/">Back to my records</a></div>`;
   }
 }
 window.addEventListener("hashchange", route);
@@ -1192,7 +1196,23 @@ async function renderLogs() {
 }
 
 // ------------------------------------------------------------------ start
+function showRestartBanner() {
+  if ($("#restartBanner")) return;
+  document.body.insertAdjacentHTML("afterbegin", `<div id="restartBanner" class="restart-banner">
+    🔄 <b>Pete's Vinyl has been updated and needs a restart.</b> Close this window, then double-click
+    <b>Pete's Vinyl</b> on the desktop. (If this message comes back, run <b>Stop_PetesVinyl.bat</b> first.)</div>`);
+}
+async function checkVersion() {
+  try {
+    const v = await api("/api/version");
+    if (v.stale) showRestartBanner();
+  } catch (e) {
+    if (!(e instanceof TypeError)) showRestartBanner();   // "Not Found": this server predates the update
+  }
+}
+
 (async function start() {
+  checkVersion();
   try {
     const s = await api("/api/settings");
     store.set("pv.name", s.settings.SELLER_NAME || "Pete");
