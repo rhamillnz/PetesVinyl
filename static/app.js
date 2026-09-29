@@ -162,6 +162,7 @@ async function route() {
   try {
     if (parts[0] === "add") return await renderPhotos(null);
     if (parts[0] === "settings") return await renderSettings();
+    if (parts[0] === "logs") return await renderLogs();
     if (parts[0] === "record" && parts[1]) {
       const id = Number(parts[1]);
       const page = parts[2] || "";
@@ -885,6 +886,8 @@ async function renderSettings() {
       <p class="muted">This page is for setting things up. Once it's done you won't need to come back here.</p>
       <div class="settings-section"><h2>Camera</h2>
         <div class="field"><label for="camSel">Which camera to use</label><select id="camSel"><option value="">Default camera</option></select></div></div>
+      <div class="settings-section"><h2>Activity</h2>
+        <a class="btn btn-chrome" href="#/logs">📜 What has the app been doing?</a></div>
       <div class="settings-section"><h2>Backup status</h2>
         <p>${backupInfo.folder ? `Backing up to <b>${esc(backupInfo.folder)}</b>` : "⚠️ Google Drive for Desktop wasn't found on this computer."}<br>
         Last backup: <b>${esc(backupInfo.last_backup || "never")}</b> ${backupInfo.last_result ? `— ${esc(backupInfo.last_result)}` : ""}</p></div>
@@ -919,6 +922,23 @@ async function renderSettings() {
     renderSettings();
     refreshBackup();
   });
+}
+
+// ------------------------------------------------------------------ ACTIVITY LOG
+async function renderLogs() {
+  const { events } = await api("/api/activity");
+  app.innerHTML = `
+    <div class="row" style="margin-bottom:18px"><a class="btn btn-chrome btn-small" href="#/settings">⬅ Back to settings</a>
+      <button class="btn btn-small" id="refreshLog">🔄 Refresh</button></div>
+    <div class="panel"><h1>What has the app been doing?</h1>
+      <p class="muted">Newest first. Every time the app asks Discogs, OpenRouter or eBay something, it shows up here. Red lines are problems. (Also saved in the <b>logs</b> folder as activity.log.)</p>
+      ${events.length ? events.map((e) => `
+        <div class="helper-card ${e.ok ? "done" : ""}" style="${e.ok ? "" : "border-color:var(--red)"}">
+          <b>${e.ok ? "✅" : "❌"} ${esc(e.source)}</b> <span class="muted">${esc(e.time)}</span><br>${esc(e.what)}
+          ${e.detail ? `<pre style="white-space:pre-wrap;margin:8px 0 0;font-size:.85rem;color:var(--text-dim)">${esc(e.detail)}</pre>` : ""}
+        </div>`).join("") : "<p>Nothing yet. Look up a record and come back.</p>"}
+    </div>`;
+  $("#refreshLog").addEventListener("click", renderLogs);
 }
 
 // ------------------------------------------------------------------ start

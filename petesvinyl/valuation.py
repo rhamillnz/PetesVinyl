@@ -17,7 +17,7 @@ from urllib.parse import quote_plus
 
 import httpx
 
-from . import ai, config, currency, discogs
+from . import activity, ai, config, currency, discogs
 
 log = logging.getLogger("petesvinyl.valuation")
 
@@ -41,10 +41,12 @@ async def ebay_sold_prices(query: str) -> list[float]:
         async with httpx.AsyncClient(timeout=20, headers=BROWSER_HEADERS, follow_redirects=True) as client:
             resp = await client.get(url)
         if resp.status_code != 200:
+            activity.record("eBay", "Sold-listings lookup", False, f"eBay refused ({resp.status_code}); using other sources")
             return []
         prices = [float(p.replace(",", "")) for p in PRICE_RE.findall(resp.text)]
         # eBay's first card is often a placeholder; drop silly outliers too.
         prices = [p for p in prices[1:] if 1 <= p <= 5000][:20]
+        activity.record("eBay", f"Sold-listings lookup: {query}", bool(prices), f"{len(prices)} sale prices found")
         return prices
     except httpx.HTTPError as exc:
         log.info("eBay sold scrape failed: %s", exc)
@@ -89,9 +91,13 @@ async def estimate(record: dict[str, Any]) -> dict[str, Any]:
     notes: list[str] = []
 
     discogs_value = None
+    if not record.get("discogs_release_id"):
+        activity.record("Valuation", "No Discogs pressing chosen for this record, so no Discogs price",
+                        False, "Pick the matching pressing on the Check details screen")
     if record.get("discogs_release_id") and discogs.is_configured():
         mv = await discogs.market_value(str(record["discogs_release_id"]), condition)
         amount = mv.get("suggested") or mv.get("lowest")
+        activity.record("Valuation", "Discogs price data", bool(amount), str(mv))
         discogs_value = await currency.convert(amount, mv.get("currency") or home, home)
         if discogs_value:
             what = "suggested price" if mv.get("suggested") else "cheapest copy for sale"

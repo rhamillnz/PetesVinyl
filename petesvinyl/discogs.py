@@ -9,7 +9,7 @@ from typing import Any
 
 import httpx
 
-from . import config
+from . import activity, config
 
 log = logging.getLogger("petesvinyl.discogs")
 API = "https://api.discogs.com"
@@ -41,10 +41,20 @@ def _headers() -> dict[str, str]:
 
 
 async def _get(path: str, params: dict[str, Any] | None = None) -> Any:
-    async with httpx.AsyncClient(timeout=30, headers=_headers()) as client:
-        resp = await client.get(f"{API}{path}", params=params)
-    resp.raise_for_status()
-    return resp.json()
+    shown = ", ".join(f"{k}={v}" for k, v in (params or {}).items() if k not in ("per_page", "type", "format"))
+    try:
+        async with httpx.AsyncClient(timeout=30, headers=_headers()) as client:
+            resp = await client.get(f"{API}{path}", params=params)
+        resp.raise_for_status()
+    except httpx.HTTPError as exc:
+        body = exc.response.text[:300] if isinstance(exc, httpx.HTTPStatusError) else str(exc)
+        status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else "no reply"
+        activity.record("Discogs", f"GET {path} {shown}", False, f"{status}: {body}")
+        raise
+    data = resp.json()
+    count = len(data["results"]) if isinstance(data, dict) and "results" in data else ""
+    activity.record("Discogs", f"GET {path} {shown}", True, f"{count} results" if count != "" else "OK")
+    return data
 
 
 async def search(record: dict[str, Any]) -> list[dict[str, Any]]:
@@ -68,6 +78,8 @@ async def search(record: dict[str, Any]) -> list[dict[str, Any]]:
             log.warning("Discogs search failed: %s", exc)
             continue
         results = data.get("results") or []
+        if not results:
+            activity.record("Discogs", "No pressings found for that search", False, str(params))
         if results:
             return _rank(results, record)
     return []

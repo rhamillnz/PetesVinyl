@@ -21,7 +21,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from petesvinyl import ai, backup, config, db, discogs, listings, publishers, valuation
+from petesvinyl import activity, ai, backup, config, db, discogs, listings, publishers, valuation
 from petesvinyl.config import IMAGES_DIR, STATIC_DIR
 from petesvinyl.db import IMAGE_SLOTS, PLATFORMS
 
@@ -435,6 +435,11 @@ async def backup_now() -> dict[str, Any]:
     global _last_backup
     _last_backup = time.time()
     return await asyncio.to_thread(backup.run_backup)
+
+
+@app.get("/api/activity")
+def activity_log() -> dict[str, Any]:
+    return {"events": activity.recent()}
 
 
 @app.get("/api/stats")

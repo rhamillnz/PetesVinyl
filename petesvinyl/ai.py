@@ -14,7 +14,7 @@ from typing import Any
 
 import httpx
 
-from . import config
+from . import activity, config
 
 log = logging.getLogger("petesvinyl.ai")
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -62,8 +62,17 @@ async def chat_json(content: list[dict[str, Any]], web_search: bool = False, max
         "HTTP-Referer": "http://localhost:8000",
         "X-Title": "PetesVinyl",
     }
-    async with httpx.AsyncClient(timeout=180) as client:
-        resp = await client.post(OPENROUTER_URL, json=body, headers=headers)
+    kind = "with web search" if "plugins" in body else "no web search"
+    has_photos = any(p.get("type") == "image_url" for p in content)
+    what = f"Asking {body['model']} ({kind}{', with photos' if has_photos else ''})"
+    try:
+        async with httpx.AsyncClient(timeout=180) as client:
+            resp = await client.post(OPENROUTER_URL, json=body, headers=headers)
+    except httpx.HTTPError as exc:
+        activity.record("OpenRouter", what, False, f"Couldn't connect: {exc}")
+        raise AIUnavailable(f"Couldn't reach OpenRouter: {exc}") from exc
+    if resp.status_code >= 400:
+        activity.record("OpenRouter", what, False, f"{resp.status_code}: {resp.text[:400]}")
     if resp.status_code == 402:
         raise AIUnavailable("The OpenRouter account has run out of credit. Top it up at openrouter.ai.")
     if resp.status_code >= 400:
@@ -73,7 +82,12 @@ async def chat_json(content: list[dict[str, Any]], web_search: bool = False, max
         text = data["choices"][0]["message"]["content"] or ""
     except (KeyError, IndexError) as exc:
         raise AIUnavailable(f"Unexpected OpenRouter reply: {str(data)[:300]}") from exc
-    return extract_json(text)
+    activity.record("OpenRouter", what, True, f"Reply: {text.strip()[:1200]}")
+    try:
+        return extract_json(text)
+    except ValueError:
+        activity.record("OpenRouter", "The AI's reply wasn't in the expected format", False, text[:400])
+        raise
 
 
 IDENTIFY_PROMPT = """You are an expert vinyl record appraiser helping an elderly collector in {location} catalogue his records.
