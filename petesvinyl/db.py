@@ -44,6 +44,7 @@ COLUMNS: list[tuple[str, str]] = [
     ("discogs_url", "TEXT DEFAULT ''"),
     ("discogs_median", "REAL"),
     ("ebay_sold_average", "REAL"),
+    ("popsike_median", "REAL"),
     ("ai_estimate", "REAL"),
     ("estimated_value", "REAL"),
     ("suggested_price", "REAL"),

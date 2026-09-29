@@ -43,6 +43,10 @@ DEFAULTS: dict[str, str] = {
     "EBAY_PAYMENT_POLICY_ID": "",
     "EBAY_RETURN_POLICY_ID": "",
     "EBAY_LOCATION_KEY": "",
+    # Popsike (past eBay auction results)
+    "POPSIKE_ENABLED": "true",
+    "POPSIKE_SEARCH_URL": "https://www.popsike.com/php/quicksearch.php?searchtext={query}",
+    "POPSIKE_CONNECTED": "",
     # Which sites Pete uses at all
     "ENABLED_PLATFORMS": "trademe,discogs,ebay,facebook,gumtree",
     # Backup

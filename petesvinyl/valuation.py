@@ -17,7 +17,7 @@ from urllib.parse import quote_plus
 
 import httpx
 
-from . import activity, ai, config, currency, discogs
+from . import activity, ai, config, currency, discogs, popsike
 
 log = logging.getLogger("petesvinyl.valuation")
 
@@ -114,6 +114,20 @@ async def estimate(record: dict[str, Any]) -> dict[str, Any]:
             sources.append({"name": "eBay sold", "value": ebay_avg, "weight": 2})
             notes.append(f"eBay: {len(prices)} recent sales, middle price {home} {ebay_avg:.0f}")
 
+    # Popsike: what the exact record really sold for at auction. A failure here must never break the price check.
+    popsike_value = None
+    if popsike.enabled() and popsike.search_query(record):
+        try:
+            res = await popsike.lookup(record)
+            if res.get("median"):
+                popsike_value = res["median"]
+                sources.append({"name": "Popsike auctions", "value": popsike_value, "weight": 3})
+                notes.append(f"Popsike: {res['count']} past auction sales, middle price {home} {popsike_value:.0f}")
+            elif res.get("note"):
+                notes.append(f"Popsike: {res['note']}")
+        except Exception as exc:  # noqa: BLE001
+            activity.record("Popsike", "Price check", False, str(exc))
+
     ai_value = None
     ai_reason = ""
     # The AI web search costs real money (about 2c a time), so only use it when Discogs and eBay
@@ -160,6 +174,7 @@ async def estimate(record: dict[str, Any]) -> dict[str, Any]:
         "currency": home,
         "discogs_median": round(discogs_value, 2) if discogs_value else None,
         "ebay_sold_average": round(ebay_avg, 2) if ebay_avg else None,
+        "popsike_median": round(popsike_value, 2) if popsike_value else None,
         "ai_estimate": round(ai_value, 2) if ai_value else None,
         "estimated_value": round(market, 2),
         "suggested_price": suggested,

@@ -526,3 +526,9 @@ body {
 
 .restart-banner { position: sticky; top: 0; z-index: 40; background: var(--red-deep); color: #fff; text-align: center;
   padding: 14px 20px; font-size: 1.1rem; border-bottom: 4px solid #fff; }
+
+.value-tiles { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+.check-links { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 4px 0 18px; }
+.check-links .label { font-weight: 700; color: var(--text-dim); width: 100%; }
+/* the current step must stay readable on the pale wood */
+.step.current { background: rgba(70, 34, 12, .96); color: #fff; }

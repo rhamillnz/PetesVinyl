@@ -784,9 +784,11 @@ async function renderPrice(id) {
       <h1>${esc(rec.artist)} — ${esc(rec.album_title)}</h1>
       <div class="value-tiles">
         ${tile(rec.discogs_median, "Discogs price")}
+        ${tile(rec.popsike_median, "Popsike past auctions")}
         ${tile(rec.ebay_sold_average, "eBay recent sales")}
         ${tile(rec.ai_estimate, "Internet research")}
       </div>
+      <div class="check-links" id="checkLinks"></div>
       <div class="price-hero">
         <div style="font-weight:700">I suggest listing it for</div>
         <div class="big">${money(rec.suggested_price)}</div>
@@ -806,6 +808,13 @@ async function renderPrice(id) {
     const p = Number($("#priceInput").value);
     if (p > 0 && p !== rec.suggested_price) await api(`/api/records/${id}`, { method: "PUT", body: { suggested_price: p } });
   };
+  api(`/api/records/${id}/price-links`).then((l) => {
+    const el = $("#checkLinks"); if (!el) return;
+    el.innerHTML = `<span class="label">See the real sold prices yourself:</span>
+      <a class="btn btn-chrome btn-small" href="${esc(l.popsike)}" target="_blank" rel="noopener">🔎 Popsike</a>
+      <a class="btn btn-chrome btn-small" href="${esc(l.ebay)}" target="_blank" rel="noopener">🔎 eBay sold items</a>
+      ${l.discogs ? `<a class="btn btn-chrome btn-small" href="${esc(l.discogs)}" target="_blank" rel="noopener">🔎 Discogs sales history</a>` : ""}`;
+  }).catch(() => {});
   $("#again").addEventListener("click", () => { flags.value.add(id); renderPrice(id); });
   $("#toSell").addEventListener("click", async () => {
     await savePrice();
@@ -1071,6 +1080,9 @@ const SETTINGS_SECTIONS = [
     ["EBAY_MARKETPLACE_ID", "Marketplace (EBAY_US, EBAY_GB, EBAY_AU)"], ["EBAY_CURRENCY", "Currency (USD, GBP, AUD)"],
     ["EBAY_CATEGORY_ID", "Category (176985 = Vinyl Records)"], ["EBAY_FULFILLMENT_POLICY_ID", "Shipping policy ID"],
     ["EBAY_PAYMENT_POLICY_ID", "Payment policy ID"], ["EBAY_RETURN_POLICY_ID", "Return policy ID"], ["EBAY_LOCATION_KEY", "Inventory location key"]]],
+  ["Popsike (past auction prices)", "Popsike archives what records really sold for on eBay. Log in once with the buttons below, then prices are read automatically.", [
+    ["POPSIKE_ENABLED", "Use Popsike prices (true/false)"],
+    ["POPSIKE_SEARCH_URL", "Popsike search address ({query} becomes the artist and album)"]]],
   ["Selling sites", "Which sites appear when selling (comma separated: trademe, discogs, ebay, facebook, gumtree).", [
     ["ENABLED_PLATFORMS", "Sites to use"]]],
   ["Backup", "Leave the folder empty to find Google Drive automatically.", [
@@ -1086,6 +1098,14 @@ async function renderSettings() {
       <p class="muted">This page is for setting things up. Once it's done you won't need to come back here.</p>
       <div class="settings-section"><h2>Camera</h2>
         <div class="field"><label for="camSel">Which camera to use</label><select id="camSel"><option value="">Default camera</option></select></div></div>
+      <div class="settings-section"><h2>Popsike login</h2>
+        <p id="popsikeState" class="muted">Checking…</p>
+        <div class="row">
+          <button type="button" class="btn btn-small" id="psLogin">🔑 Log in to Popsike</button>
+          <button type="button" class="btn btn-green btn-small" id="psDone">✅ I've logged in</button>
+          <button type="button" class="btn btn-chrome btn-small" id="psTest">🧪 Test Popsike</button>
+        </div>
+        <p class="muted" style="margin-top:10px">Press <b>Log in</b>, then use "Log in with Google" on the Popsike window that opens (your Google password is only ever typed into Google's own page). When you're in, close that window and press <b>I've logged in</b>.</p></div>
       <div class="settings-section"><h2>Activity</h2>
         <a class="btn btn-chrome" href="#/logs">📜 What has the app been doing?</a></div>
       <div class="settings-section"><h2>Backup status</h2>
@@ -1107,6 +1127,22 @@ async function renderSettings() {
     sel.value = store.get("pv.camera", "");
     sel.addEventListener("change", () => { store.set("pv.camera", sel.value); toast("Camera choice saved."); });
   } catch (_) { /* no camera API */ }
+
+  const psState = async () => {
+    try {
+      const s = await api("/api/popsike/status");
+      $("#popsikeState").textContent = !s.edge_found ? "⚠️ Microsoft Edge wasn't found, so the Popsike login can't be saved."
+        : s.connected ? "✅ Logged in to Popsike (press Test Popsike to check it still works)." : "Not logged in yet.";
+    } catch (_) { $("#popsikeState").textContent = ""; }
+  };
+  psState();
+  $("#psLogin").addEventListener("click", async () => { const r = await api("/api/popsike/connect", { method: "POST" }); toast(r.message, !r.ok); });
+  $("#psDone").addEventListener("click", async () => { const r = await api("/api/popsike/done", { method: "POST" }); toast(r.message, !r.ok); psState(); });
+  $("#psTest").addEventListener("click", async () => {
+    const b = $("#psTest"); b.disabled = true; b.textContent = "Testing… (up to a minute)";
+    try { const r = await api("/api/popsike/test", { method: "POST" }); toast(r.message, !r.ok); } catch (e) { toast(e.message, true); }
+    b.disabled = false; b.textContent = "🧪 Test Popsike";
+  });
 
   // Only send fields that were actually edited, so masked secrets are never overwritten.
   const changed = new Set();

@@ -142,3 +142,26 @@ restarts the app automatically. If a page ever shows **"Not Found"** or a red *"
 running copy is older than the files on disk: run `Stop_PetesVinyl.bat`, then start the app again.
 (If it was started as Administrator, a normal launch cannot stop it. Stop it once from an Administrator
 PowerShell, then always start it normally.)
+
+---
+
+## Popsike (past auction prices)
+
+[Popsike](https://www.popsike.com/) archives what records really sold for on eBay auctions, which is the best
+guide for rare records. It has no API, so the app reads it the way a person would:
+
+1. **Settings -> Popsike login -> Log in to Popsike.** A normal Edge window opens on Popsike; use *Log in with
+   Google* there (your Google password is only ever typed into Google's own page, never into this app).
+   Close the window and press **I've logged in**. The login is kept in the private `popsike_profile` folder.
+2. Press **Test Popsike**. It looks up a well-known record and tells you whether prices could be read.
+3. From then on, every price check quietly loads Popsike's results for the record and adds a
+   **Popsike past auctions** figure (weighted heavily, since it's real sold prices). The **Price** step also has
+   one-tap buttons to open Popsike, eBay sold items and Discogs so you can check the numbers yourself.
+
+Good to know:
+- The lookup makes one page load per price check and never tries to get around a CAPTCHA or "verify you are
+  human" page. If one appears, the log page says so. Popsike's own terms apply to your use of it, so check them.
+- The reading step uses the AI (OpenRouter) on the page *text*, a fraction of a cent. Without an AI key it falls
+  back to a simpler price-spotting method.
+- If Popsike changes its search address, edit **Popsike search address** in Settings (`{query}` is replaced by the
+  artist and album). Turn Popsike off with **Use Popsike prices = false**.

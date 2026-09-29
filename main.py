@@ -23,7 +23,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from petesvinyl import version, activity, ai, backup, config, db, discogs, listings, publishers, valuation
+from petesvinyl import popsike, version, activity, ai, backup, config, db, discogs, listings, publishers, valuation
 from petesvinyl.config import IMAGES_DIR, STATIC_DIR
 from petesvinyl.db import IMAGE_SLOTS, PLATFORMS
 
@@ -340,6 +340,7 @@ async def estimate_value(body: ValueRequest) -> dict[str, Any]:
         db.update_record(body.record_id, {
             "discogs_median": result["discogs_median"],
             "ebay_sold_average": result["ebay_sold_average"],
+            "popsike_median": result["popsike_median"],
             "ai_estimate": result["ai_estimate"],
             "estimated_value": result["estimated_value"],
             "suggested_price": result["suggested_price"],
@@ -557,6 +558,47 @@ async def quit_app() -> dict[str, Any]:
 
     threading.Timer(1.5, _exit).start()  # let the reply and the "closed" page reach the browser first
     return {"ok": True, "message": message}
+
+
+@app.get("/api/records/{record_id}/price-links")
+def price_links(record_id: int) -> dict[str, Any]:
+    """Links Pete (or you) can open to check real sold prices by eye."""
+    from urllib.parse import quote_plus
+    rec = _require(record_id)
+    q = quote_plus(f"{rec.get('artist') or ''} {rec.get('album_title') or ''} vinyl".strip())
+    links = {
+        "ebay": f"https://www.ebay.com/sch/i.html?_nkw={q}&_sacat=176985&LH_Sold=1&LH_Complete=1",
+        "popsike": popsike.search_url(rec),
+    }
+    if rec.get("discogs_release_id"):
+        links["discogs"] = f"https://www.discogs.com/release/{rec['discogs_release_id']}"
+    return links
+
+
+@app.get("/api/popsike/status")
+def popsike_status() -> dict[str, Any]:
+    return {"enabled": popsike.enabled(), "connected": popsike.is_connected(), "edge_found": popsike.find_edge() is not None}
+
+
+@app.post("/api/popsike/connect")
+def popsike_connect() -> dict[str, Any]:
+    return popsike.open_login()
+
+
+@app.post("/api/popsike/done")
+def popsike_done() -> dict[str, Any]:
+    return popsike.finish_login()
+
+
+@app.post("/api/popsike/test")
+async def popsike_test() -> dict[str, Any]:
+    """Look up a well-known record so it's easy to see whether Popsike is being read properly."""
+    res = await popsike.lookup({"artist": "Bob Marley", "album_title": "Exodus"})
+    ok = bool(res.get("median"))
+    home = config.get("HOME_CURRENCY")
+    msg = (f"Working: found {res['count']} sales, middle price {home} {res['median']:.0f}." if ok
+           else f"Couldn't read any prices. {res.get('note') or 'See the log page for details.'}")
+    return {"ok": ok, "message": msg}
 
 
 @app.get("/api/activity")
