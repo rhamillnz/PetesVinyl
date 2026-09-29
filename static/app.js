@@ -277,7 +277,7 @@ function jukeboxHTML(records) {
   return `<div class="jukebox-window">
     <div class="letter-bar" role="navigation" aria-label="Jump to a letter">${bar}</div>
     ${sections}
-  </div>`;
+  </div><div class="grille" aria-hidden="true"></div>`;
 }
 
 function emptyHTML(total) {
