@@ -1121,13 +1121,44 @@ async function renderSettings() {
 }
 
 // ------------------------------------------------------------------ ACTIVITY LOG
+function ago(iso) {
+  const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (mins < 2) return "just now";
+  if (mins < 90) return `${mins} minutes ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 48) return `${hrs} hours ago`;
+  return `${Math.round(hrs / 24)} days ago`;
+}
+const niceTime = (iso) => new Date(iso).toLocaleString([], { weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
+
+function backupsHTML(log) {
+  const last = log.last_ok;
+  const stale = !last || Date.now() - new Date(last.at).getTime() > 24 * 3600 * 1000;
+  const banner = last
+    ? `<div class="backup-banner ${stale ? "warn" : "good"}">${stale ? "⚠️" : "✅"} Last successful backup: <b>${esc(niceTime(last.at))}</b> (${ago(last.at)})${stale ? " - it's been over a day. Press Back up now." : ""}</div>`
+    : `<div class="backup-banner warn">⚠️ There hasn't been a successful backup yet. Press <b>Back up now</b>.</div>`;
+  return `<div class="panel" id="backups" style="margin-bottom:22px">
+    <h1>💾 Backups to Google Drive</h1>
+    ${banner}
+    <div class="row" style="margin:14px 0">
+      <button class="btn btn-green btn-small" id="backupNow">💾 Back up now</button>
+      <span class="muted">Saving to: ${esc(log.status.folder || "(Google Drive not found)")}</span>
+    </div>
+    ${log.entries.length ? `<table class="backup-table"><thead><tr><th>When</th><th></th><th>What happened</th><th>How</th></tr></thead><tbody>
+      ${log.entries.map((e) => `<tr class="${e.ok ? "" : "bad"}"><td>${esc(niceTime(e.at))}<br><span class="muted">${ago(e.at)}</span></td>
+        <td>${e.ok ? "✅" : "❌"}</td><td>${esc(e.message)}</td><td>${esc(e.kind)}</td></tr>`).join("")}</tbody></table>`
+      : `<p class="muted">No backups recorded yet.</p>`}
+  </div>`;
+}
+
 async function renderLogs() {
-  const { events } = await api("/api/activity");
+  const [{ events }, backupLog] = await Promise.all([api("/api/activity"), api("/api/backup-log")]);
   app.innerHTML = `
     <div class="row" style="margin-bottom:18px"><a class="btn btn-chrome btn-small" href="#/settings">⬅ Back to settings</a>
       <button class="btn btn-small" id="refreshLog">🔄 Refresh</button>
       <button class="btn btn-green btn-small" id="testKeys">🔌 Test my keys</button></div>
     <div id="testResult"></div>
+    ${backupsHTML(backupLog)}
     <div class="panel"><h1>What has the app been doing?</h1>
       <p class="muted">Newest first. Every time the app asks Discogs, OpenRouter or eBay something, it shows up here. Red lines are problems. (Also saved in the <b>logs</b> folder as activity.log.)</p>
       ${events.length ? events.map((e) => `
@@ -1137,6 +1168,12 @@ async function renderLogs() {
         </div>`).join("") : "<p>Nothing yet. Look up a record and come back.</p>"}
     </div>`;
   $("#refreshLog").addEventListener("click", renderLogs);
+  $("#backupNow").addEventListener("click", async () => {
+    const btn = $("#backupNow");
+    btn.disabled = true; btn.textContent = "Backing up…";
+    try { const r = await api("/api/backup", { method: "POST" }); toast(r.message, !r.ok); } catch (e) { toast(e.message, true); }
+    renderLogs();
+  });
   $("#testKeys").addEventListener("click", async () => {
     const btn = $("#testKeys");
     btn.disabled = true; btn.textContent = "Testing…";

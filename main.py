@@ -48,7 +48,7 @@ async def backup_loop() -> None:
         due = _last_change > _last_backup or time.time() - _last_backup > every
         if due and backup.backup_folder() is not None:
             _last_backup = time.time()
-            result = await asyncio.to_thread(backup.run_backup)
+            result = await asyncio.to_thread(backup.run_backup, "automatic")
             log.info("Automatic backup: %s", result["message"])
         await asyncio.sleep(15 * 60)
 
@@ -479,7 +479,7 @@ def backup_status() -> dict[str, Any]:
 async def backup_now() -> dict[str, Any]:
     global _last_backup
     _last_backup = time.time()
-    return await asyncio.to_thread(backup.run_backup)
+    return await asyncio.to_thread(backup.run_backup, "manual")
 
 
 @app.post("/api/test-connections")
@@ -528,7 +528,7 @@ async def quit_app() -> dict[str, Any]:
     """The big Stop button: back up, then shut the whole app down."""
     message = ""
     if backup.backup_folder() is not None:
-        result = await asyncio.to_thread(backup.run_backup)
+        result = await asyncio.to_thread(backup.run_backup, "on closing")
         message = result["message"]
     await publishers.shutdown_browser()
 
@@ -556,6 +556,12 @@ async def quit_app() -> dict[str, Any]:
 @app.get("/api/activity")
 def activity_log() -> dict[str, Any]:
     return {"events": activity.recent()}
+
+
+@app.get("/api/backup-log")
+def backup_log() -> dict[str, Any]:
+    entries = db.backup_history(100)
+    return {"entries": entries, "last_ok": next((e for e in entries if e["ok"]), None), "status": backup.status()}
 
 
 @app.get("/api/stats")

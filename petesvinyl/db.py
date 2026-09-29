@@ -97,6 +97,9 @@ def init(conn: sqlite3.Connection) -> None:
         if name not in existing:
             conn.execute(f"ALTER TABLE records ADD COLUMN {name} {kind}")
     conn.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
+    conn.execute("""CREATE TABLE IF NOT EXISTS backup_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT, ok INTEGER, kind TEXT, message TEXT,
+        folder TEXT, records INTEGER, photos INTEGER)""")
     conn.commit()
 
 
@@ -231,3 +234,18 @@ def set_setting(key: str, value: str) -> None:
             (key, value),
         )
         conn.commit()
+
+
+def add_backup_log(ok: bool, kind: str, message: str, folder: str = "", records: int = 0, photos: int = 0) -> None:
+    with _lock:
+        conn = connect()
+        conn.execute("INSERT INTO backup_log (at, ok, kind, message, folder, records, photos) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                     (now(), 1 if ok else 0, kind, message, folder, records, photos))
+        conn.execute("DELETE FROM backup_log WHERE id NOT IN (SELECT id FROM backup_log ORDER BY id DESC LIMIT 500)")
+        conn.commit()
+
+
+def backup_history(limit: int = 100) -> list[dict[str, Any]]:
+    with _lock:
+        rows = connect().execute("SELECT * FROM backup_log ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+    return [{**dict(r), "ok": bool(r["ok"])} for r in rows]

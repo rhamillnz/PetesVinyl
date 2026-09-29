@@ -49,7 +49,13 @@ async def _get(path: str, params: dict[str, Any] | None = None) -> Any:
     except httpx.HTTPError as exc:
         body = exc.response.text[:300] if isinstance(exc, httpx.HTTPStatusError) else str(exc)
         status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else "no reply"
-        activity.record("Discogs", f"GET {path} {shown}", False, f"{status}: {body}")
+        what, detail = f"GET {path} {shown}", f"{status}: {body}"
+        if "seller settings" in body:
+            what = "Discogs price suggestion (needs your Discogs seller settings)"
+            detail = ("Discogs only gives price suggestions once the seller settings are filled in on the Discogs "
+                      "account: go to discogs.com/settings/seller and complete them. Until then the app uses the "
+                      "cheapest copy for sale on Discogs instead.")
+        activity.record("Discogs", what, False, detail)
         raise
     data = resp.json()
     count = len(data["results"]) if isinstance(data, dict) and "results" in data else ""

@@ -514,3 +514,12 @@ body {
 .choice.chip { min-height: 48px; }
 .photos-big button { position: relative; }
 .photos-big .cap { position: absolute; left: 0; right: 0; bottom: 0; padding: 4px 8px; font-size: .8rem; font-weight: 700; background: rgba(0, 0, 0, .7); color: #fff; }
+
+/* ---------- backups section of the log page ---------- */
+.backup-banner { border-radius: 14px; padding: 14px 18px; font-size: 1.15rem; margin: 10px 0; }
+.backup-banner.good { background: rgba(54, 184, 92, .2); border: 3px solid var(--green); }
+.backup-banner.warn { background: rgba(255, 182, 39, .18); border: 3px solid var(--amber); }
+.backup-table { width: 100%; border-collapse: collapse; font-size: .95rem; }
+.backup-table th { text-align: left; color: var(--text-dim); padding: 6px 10px; border-bottom: 2px solid #6b3a22; }
+.backup-table td { padding: 10px; vertical-align: top; border-bottom: 1px solid rgba(255, 255, 255, .1); }
+.backup-table tr.bad td { background: rgba(230, 58, 46, .14); }

@@ -19,7 +19,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from . import config, db
+from . import activity, config, db
 from .config import DB_PATH, IMAGES_DIR
 
 log = logging.getLogger("petesvinyl.backup")
@@ -63,13 +63,23 @@ def status() -> dict[str, Any]:
     }
 
 
-def run_backup() -> dict[str, Any]:
+def _finish(ok: bool, kind: str, msg: str, folder: str = "", records: int = 0, photos: int = 0) -> dict[str, Any]:
+    """Record this attempt permanently (Backups section of the log page) and in the activity log."""
+    db.set_setting("LAST_BACKUP_RESULT", msg)
+    if ok:
+        db.set_setting("LAST_BACKUP", datetime.now().strftime("%d %b %Y, %I:%M %p"))
+    db.add_backup_log(ok, kind, msg, folder, records, photos)
+    activity.record("Backup", f"{kind.capitalize()} backup", ok, msg)
+    return {"ok": ok, "message": msg, "folder": folder, "records": records, "photos": photos,
+            "when": datetime.now().strftime("%d %b %Y, %I:%M %p")}
+
+
+def run_backup(kind: str = "manual") -> dict[str, Any]:
+    """kind is 'manual' (Back Up button), 'automatic' (scheduled) or 'on closing' (Stop button)."""
     folder = backup_folder()
     if folder is None:
-        msg = ("Google Drive isn't set up on this computer yet. Install 'Google Drive for Desktop', "
-               "sign in, then press Back Up again.")
-        db.set_setting("LAST_BACKUP_RESULT", msg)
-        return {"ok": False, "message": msg}
+        return _finish(False, kind, "Google Drive wasn't found on this computer, so nothing was backed up. "
+                       "Install 'Google Drive for Desktop', sign in, then press Back Up again.")
     try:
         folder.mkdir(parents=True, exist_ok=True)
         (folder / "history").mkdir(exist_ok=True)
@@ -79,9 +89,22 @@ def run_backup() -> dict[str, Any]:
         dst = sqlite3.connect(tmp)
         with dst:
             src.backup(dst)
+        n_source = src.execute("SELECT COUNT(*) FROM records").fetchone()[0]
         src.close()
         dst.close()
         os.replace(tmp, target)
+
+        # Check the copy really is a good one before calling it a success.
+        check = sqlite3.connect(target)
+        try:
+            n_copy = check.execute("SELECT COUNT(*) FROM records").fetchone()[0]
+            healthy = check.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        finally:
+            check.close()
+        if not healthy or n_copy != n_source:
+            return _finish(False, kind, f"The backup copy failed its check ({n_copy} of {n_source} records, "
+                           f"integrity {'ok' if healthy else 'BAD'}). Try again.", str(folder), n_copy)
+
         stamp = datetime.now().strftime("%Y-%m-%d")
         shutil.copy2(target, folder / "history" / f"vinyl_collection_{stamp}.db")
         history = sorted((folder / "history").glob("vinyl_collection_*.db"))
@@ -106,13 +129,9 @@ def run_backup() -> dict[str, Any]:
             for rec in db.list_records():
                 writer.writerow(rec)
 
-        when = datetime.now().strftime("%d %b %Y, %I:%M %p")
-        msg = f"Backed up to Google Drive ({copied} new photos)."
-        db.set_setting("LAST_BACKUP", when)
-        db.set_setting("LAST_BACKUP_RESULT", msg)
-        return {"ok": True, "message": msg, "folder": str(folder), "when": when}
-    except OSError as exc:
+        msg = (f"Backed up {n_source} record{'s' if n_source != 1 else ''} and {copied} new photo"
+               f"{'s' if copied != 1 else ''} to {folder}. Copy checked: all {n_copy} records present.")
+        return _finish(True, kind, msg, str(folder), n_source, copied)
+    except (OSError, sqlite3.Error) as exc:
         log.exception("Backup failed")
-        msg = f"Backup didn't work: {exc}"
-        db.set_setting("LAST_BACKUP_RESULT", msg)
-        return {"ok": False, "message": msg}
+        return _finish(False, kind, f"The backup didn't work: {exc}", str(folder))
