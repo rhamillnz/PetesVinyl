@@ -46,6 +46,9 @@ def extract_json(text: str) -> dict[str, Any]:
 
 
 async def chat_json(content: list[dict[str, Any]], web_search: bool = False, max_tokens: int = 1500) -> dict[str, Any]:
+    # Gemini 2.5 is a "thinking" model: its hidden reasoning shares this limit, so leave plenty of room
+    # or it can use everything up and return an empty answer.
+    max_tokens = max(max_tokens, 4000)
     key = config.get("OPENROUTER_API_KEY")
     if not key:
         raise AIUnavailable("No OpenRouter API key set. Add one in Settings.")
@@ -55,6 +58,7 @@ async def chat_json(content: list[dict[str, Any]], web_search: bool = False, max
         "max_tokens": max_tokens,
         "temperature": 0.1,
         "usage": {"include": True},  # ask OpenRouter to report what this call cost
+        "reasoning": {"effort": "low"},  # reading text off a cover doesn't need lots of thinking
     }
     if web_search and config.get_bool("AI_WEB_SEARCH"):
         body["plugins"] = [{"id": "web", "max_results": 5}]
@@ -66,31 +70,46 @@ async def chat_json(content: list[dict[str, Any]], web_search: bool = False, max
     kind = "with web search" if "plugins" in body else "no web search"
     has_photos = any(p.get("type") == "image_url" for p in content)
     what = f"Asking {body['model']} ({kind}{', with photos' if has_photos else ''})"
-    try:
-        async with httpx.AsyncClient(timeout=180) as client:
-            resp = await client.post(OPENROUTER_URL, json=body, headers=headers)
-    except httpx.HTTPError as exc:
-        activity.record("OpenRouter", what, False, f"Couldn't connect: {exc}")
-        raise AIUnavailable(f"Couldn't reach OpenRouter: {exc}") from exc
-    if resp.status_code >= 400:
-        activity.record("OpenRouter", what, False, f"{resp.status_code}: {resp.text[:400]}")
-    if resp.status_code == 402:
-        raise AIUnavailable("The OpenRouter account has run out of credit. Top it up at openrouter.ai.")
-    if resp.status_code >= 400:
-        raise AIUnavailable(f"OpenRouter error {resp.status_code}: {resp.text[:300]}")
-    data = resp.json()
-    try:
-        text = data["choices"][0]["message"]["content"] or ""
-    except (KeyError, IndexError) as exc:
-        raise AIUnavailable(f"Unexpected OpenRouter reply: {str(data)[:300]}") from exc
-    cost = (data.get("usage") or {}).get("cost")
-    cost_txt = f"Cost: ${cost:.4f}. " if isinstance(cost, (int, float)) else ""
-    activity.record("OpenRouter", what, True, f"{cost_txt}Reply: {text.strip()[:1200]}")
-    try:
-        return extract_json(text)
-    except ValueError:
-        activity.record("OpenRouter", "The AI's reply wasn't in the expected format", False, text[:400])
-        raise
+    problem = ""
+    for attempt in (1, 2):
+        label = what if attempt == 1 else f"{what} - trying again"
+        try:
+            async with httpx.AsyncClient(timeout=180) as client:
+                resp = await client.post(OPENROUTER_URL, json=body, headers=headers)
+        except httpx.HTTPError as exc:
+            activity.record("OpenRouter", label, False, f"Couldn't connect: {exc}")
+            raise AIUnavailable(f"Couldn't reach OpenRouter: {exc}") from exc
+        if resp.status_code >= 400:
+            activity.record("OpenRouter", label, False, f"{resp.status_code}: {resp.text[:400]}")
+        if resp.status_code == 402:
+            raise AIUnavailable("The OpenRouter account has run out of credit. Top it up at openrouter.ai.")
+        if resp.status_code >= 400:
+            raise AIUnavailable(f"OpenRouter error {resp.status_code}: {resp.text[:300]}")
+        data = resp.json()
+        try:
+            choice = data["choices"][0]
+            text = choice["message"].get("content") or ""
+        except (KeyError, IndexError, AttributeError) as exc:
+            activity.record("OpenRouter", label, False, f"Unexpected reply: {str(data)[:400]}")
+            problem = "OpenRouter sent back something unexpected"
+            continue
+        cost = (data.get("usage") or {}).get("cost")
+        cost_txt = f"Cost: ${cost:.4f}. " if isinstance(cost, (int, float)) else ""
+        finish = choice.get("finish_reason") or choice.get("native_finish_reason") or "?"
+        try:
+            result = extract_json(text)
+        except ValueError:
+            why = "The AI's reply was empty" if not text.strip() else "The AI's reply had no usable answer in it"
+            if finish == "length":
+                why += " (it ran out of room)"
+            activity.record("OpenRouter", label, False,
+                            f"{cost_txt}{why}. Finish reason: {finish}. Reply: {text.strip()[:600] or '(nothing)'}")
+            problem = why
+            continue
+        activity.record("OpenRouter", label, True, f"{cost_txt}Reply: {text.strip()[:1200]}")
+        return result
+    raise AIUnavailable(f"{problem}, even after trying twice. Please press 'Read the photos again', "
+                        "or type the details in.")
 
 
 IDENTIFY_PROMPT = """You are an expert vinyl record appraiser helping an elderly collector in {location} catalogue his records.
