@@ -6,11 +6,13 @@ Secrets are never written: URLs are logged without tokens and the AI's replies a
 from __future__ import annotations
 
 import collections
+import re
 import threading
 from datetime import datetime
 
 from .config import LOGS_DIR
 
+_LINE = re.compile(r"^(\d{2} \w{3} \d\d:\d\d:\d\d) \[([^\]]+)\] (OK|FAIL) ?(.*)$")
 _events: collections.deque = collections.deque(maxlen=300)
 _lock = threading.Lock()
 
@@ -22,8 +24,12 @@ def _load_previous() -> None:
     except OSError:
         return
     for line in lines:
-        ok = " OK " in line[:40]
-        _events.appendleft({"time": line[:15], "source": "earlier", "what": line[15:], "ok": ok, "detail": ""})
+        m = _LINE.match(line)
+        if not m:
+            continue  # stray fragment from an older, multi-line log format
+        time_, source, status, rest = m.groups()
+        what, _, detail = rest.partition(" | ")
+        _events.appendleft({"time": time_, "source": source, "what": what, "ok": status == "OK", "detail": detail})
 
 
 _load_previous()
@@ -37,8 +43,9 @@ def record(source: str, what: str, ok: bool = True, detail: str = "") -> None:
         try:
             LOGS_DIR.mkdir(exist_ok=True)
             with open(LOGS_DIR / "activity.log", "a", encoding="utf-8") as fh:
+                one_line = " ".join(ev["detail"].split())
                 fh.write(f"{ev['time']} [{source}] {'OK ' if ok else 'FAIL '}{what}"
-                         + (f" | {ev['detail']}" if ev["detail"] else "") + "\n")
+                         + (f" | {one_line}" if one_line else "") + "\n")
         except OSError:
             pass
 

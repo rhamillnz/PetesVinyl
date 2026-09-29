@@ -92,8 +92,10 @@ async def chat_json(content: list[dict[str, Any]], web_search: bool = False, max
 
 IDENTIFY_PROMPT = """You are an expert vinyl record appraiser helping an elderly collector in {location} catalogue his records.
 Look at these photos of ONE record ({which}). Identify the exact release and pressing.
-Use the web to check Discogs if you can: match catalogue numbers, label design, barcode, matrix/runout
-etchings and small print (e.g. "Made in England", "Manufactured by ... NZ") to find the specific pressing.
+First read ALL the text printed on the covers and labels (artist, title, label, catalogue number, barcode,
+matrix/runout etchings, small print like "Made in England" or "Manufactured by ... NZ"). Use that text,
+plus your own knowledge of the release, to identify the exact pressing. Never leave artist or album_title
+empty if any text on the cover gives a clue; give your best guess and set confidence to "low".
 
 Reply with ONLY a JSON object, no other text:
 {{
@@ -125,7 +127,9 @@ async def identify_record(images: dict[str, Path]) -> dict[str, Any]:
     if not parts:
         raise AIUnavailable("No photos to look at yet.")
     prompt = IDENTIFY_PROMPT.format(location=config.get("SELLER_LOCATION"), which=", ".join(shown))
-    return await chat_json([{"type": "text", "text": prompt}, *parts], web_search=True)
+    # No web search here: reading the photos is faster, cheaper and more reliable on its own.
+    # Discogs then finds the exact pressing from what the AI read.
+    return await chat_json([{"type": "text", "text": prompt}, *parts], web_search=False)
 
 
 VALUE_PROMPT = """You are a vinyl record valuer. Research what this exact pressing actually SELLS for.
