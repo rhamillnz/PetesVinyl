@@ -1,7 +1,7 @@
 """Popsike: an archive of past eBay auction results (best for rare records).
 
 Popsike has no API, so this works like a person would:
-  1. Pete logs in ONCE in a normal Edge window (Settings -> Connect Popsike, "Log in with Google" on their site).
+  1. Pete logs in ONCE in a normal Google Chrome window (or Edge if Chrome isn't installed) (Settings -> Connect Popsike, "Log in with Google" on their site).
      The app never sees his Google password; the login just stays in the private popsike_profile folder.
   2. For each price check the app opens that same profile invisibly, loads the search results page, and reads the
      page text. The cheap AI step picks the sold prices out of the text, so it doesn't depend on Popsike's layout.
@@ -14,14 +14,13 @@ import asyncio
 import logging
 import os
 import re
-import shutil
 import statistics
 import subprocess
 import sys
 from typing import Any
 from urllib.parse import quote_plus
 
-from . import activity, ai, config, currency
+from . import activity, ai, browser, config, currency
 from .config import BASE_DIR
 
 log = logging.getLogger("petesvinyl.popsike")
@@ -30,15 +29,6 @@ HOME_URL = "https://www.popsike.com/"
 DEFAULT_SEARCH_URL = "https://www.popsike.com/php/quicksearch.php?searchtext={query}"
 _lock = asyncio.Lock()
 BLOCK_WORDS = ("captcha", "verify you are human", "are you a robot", "access denied", "just a moment", "unusual traffic")
-
-
-def find_edge() -> str | None:
-    for path in (shutil.which("msedge"),
-                 r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-                 r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"):
-        if path and os.path.exists(path):
-            return path
-    return None
 
 
 def enabled() -> bool:
@@ -60,27 +50,19 @@ def search_url(rec: dict[str, Any]) -> str:
 
 # --------------------------------------------------------------------------- logging in
 def _kill_profile_browser() -> None:
-    if os.name != "nt":
-        return
-    script = ("Get-CimInstance Win32_Process -Filter \"Name='msedge.exe'\" | "
-              "Where-Object { $_.CommandLine -like '*popsike_profile*' } | "
-              "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }")
-    try:
-        subprocess.run(["powershell", "-NoProfile", "-Command", script], creationflags=0x08000000, timeout=20)
-    except (OSError, subprocess.SubprocessError):
-        pass
+    browser.kill_profile_windows(["popsike_profile"])
 
 
 def open_login() -> dict[str, Any]:
-    """Open a NORMAL Edge window (not automated, so Google allows the sign-in) on Popsike with its own profile."""
-    edge = find_edge()
-    if not edge:
-        activity.record("Popsike", "Login window", False, "Microsoft Edge wasn't found on this computer.")
-        return {"ok": False, "message": "I couldn't find Microsoft Edge on this computer."}
+    """Open a NORMAL browser window (not automated, so Google allows the sign-in) on Popsike with its own profile."""
+    found = browser.find_browser()
+    if not found:
+        activity.record("Popsike", "Login window", False, "Neither Google Chrome nor Microsoft Edge was found.")
+        return {"ok": False, "message": "I couldn't find Google Chrome (or Microsoft Edge) on this computer."}
     _kill_profile_browser()
     PROFILE_DIR.mkdir(exist_ok=True)
-    subprocess.Popen([edge, f"--user-data-dir={PROFILE_DIR}", "--no-first-run", "--no-default-browser-check", HOME_URL])
-    activity.record("Popsike", "Opened the Popsike login window", True)
+    subprocess.Popen([found.path, f"--user-data-dir={PROFILE_DIR}", "--no-first-run", "--no-default-browser-check", HOME_URL])
+    activity.record("Popsike", f"Opened the Popsike login window in {found.name}", True)
     return {"ok": True, "message": "A Popsike window has opened. Log in there (you can use 'Log in with Google'), "
                                    "then come back here and press 'I've logged in'."}
 
@@ -101,8 +83,8 @@ async def fetch_page_text(url: str) -> str:
     exe = os.environ.get("PETESVINYL_BROWSER_EXE")   # used by the automated tests
     if exe:
         kwargs["executable_path"] = exe
-    elif find_edge():
-        kwargs["channel"] = "msedge"   # same browser that did the login, so the saved login is readable
+    elif browser.find_browser():
+        kwargs["channel"] = browser.find_browser().channel   # same browser that did the login, so the saved login is readable
     PROFILE_DIR.mkdir(exist_ok=True)
     async with async_playwright() as pw:
         ctx = await pw.chromium.launch_persistent_context(str(PROFILE_DIR), **kwargs)

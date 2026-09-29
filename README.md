@@ -49,7 +49,7 @@ uvicorn main:app --port 8000
 
 ### 4. Start it
 Double-click **Pete's Vinyl** on the desktop (or `Start_PetesVinyl.bat`). The server starts quietly in the
-background (no black window to close by accident) and the app opens in Microsoft Edge as its own window.
+background (no black window to close by accident) and the app opens in Google Chrome (or Microsoft Edge if Chrome isn't installed) as its own window.
 Double-clicking again while it's running just reopens the window. `Stop_PetesVinyl.bat` stops it; restarting the PC does too.
 
 The first time, the browser will ask to use the camera. Click **Allow**.
@@ -108,7 +108,7 @@ Pete always checks it and presses *Post* himself. Websites change their layouts,
 
 ```
 main.py                 FastAPI app: REST API + serves the UI and photos
-run.py                  Windows launcher (background server + Edge app window)
+run.py                  Windows launcher (background server + Chrome/Edge app window)
 petesvinyl/
   config.py             settings: .env, overridden by values saved in the Settings screen
   db.py                 SQLite (vinyl_collection.db), auto-migrating schema
@@ -150,7 +150,7 @@ PowerShell, then always start it normally.)
 [Popsike](https://www.popsike.com/) archives what records really sold for on eBay auctions, which is the best
 guide for rare records. It has no API, so the app reads it the way a person would:
 
-1. **Settings -> Popsike login -> Log in to Popsike.** A normal Edge window opens on Popsike; use *Log in with
+1. **Settings -> Popsike login -> Log in to Popsike.** A normal Chrome window opens on Popsike; use *Log in with
    Google* there (your Google password is only ever typed into Google's own page, never into this app).
    Close the window and press **I've logged in**. The login is kept in the private `popsike_profile` folder.
 2. Press **Test Popsike**. It looks up a well-known record and tells you whether prices could be read.

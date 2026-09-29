@@ -14,3 +14,4 @@ browser_profile/
 *.db-shm
 edge_profile/
 popsike_profile/
+app_profile/

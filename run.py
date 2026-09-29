@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import socket
 import subprocess
 import sys
@@ -19,6 +18,9 @@ import webbrowser
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parent
+sys.path.insert(0, str(BASE))
+
+from petesvinyl import browser  # noqa: E402
 PORT = 8000
 URL = f"http://localhost:{PORT}"
 
@@ -51,19 +53,19 @@ def running_version():
         return None
 
 
+APP_PROFILES = ["app_profile", "edge_profile"]   # edge_profile = the folder older versions used
+
+
 def stop_running_copy() -> None:
     """Stop whatever is listening on the port (an old copy) and close its app window."""
     if os.name == "nt":
-        script = (
-            f"Get-NetTCPConnection -LocalPort {PORT} -State Listen -ErrorAction SilentlyContinue | "
-            "ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }; "
-            "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe'\" | "
-            "Where-Object { $_.CommandLine -like '*edge_profile*' } | "
-            "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }")
+        script = (f"Get-NetTCPConnection -LocalPort {PORT} -State Listen -ErrorAction SilentlyContinue | "
+                  "ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }")
         try:
             subprocess.run(["powershell", "-NoProfile", "-Command", script], creationflags=0x08000000, timeout=20)
         except (OSError, subprocess.SubprocessError):
             pass
+        browser.kill_profile_windows(APP_PROFILES)
     else:
         subprocess.run(["fuser", "-k", f"{PORT}/tcp"], capture_output=True)
     for _ in range(40):          # wait up to ~10 s for the port to be free
@@ -73,18 +75,14 @@ def stop_running_copy() -> None:
 
 
 def open_browser() -> None:
-    """Prefer Microsoft Edge in 'app mode' (no tabs or address bar - looks like a real program)."""
-    edge_paths = [
-        shutil.which("msedge"),
-        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-    ]
-    for path in edge_paths:
-        if path and os.path.exists(path):
-            # Its own private profile, so the Stop button can close exactly this window and nothing else.
-            subprocess.Popen([path, f"--app={URL}", "--start-maximized", f"--user-data-dir={BASE / 'edge_profile'}",
-                              "--no-first-run", "--no-default-browser-check"])
-            return
+    """Open the app in Google Chrome (or Edge if Chrome isn't installed) in 'app mode': no tabs or address bar,
+    so it looks like a real program. It gets its own private profile so the Stop button can close exactly this
+    window and nothing else."""
+    found = browser.find_browser()
+    if found:
+        subprocess.Popen([found.path, f"--app={URL}", "--start-maximized", f"--user-data-dir={BASE / 'app_profile'}",
+                          "--no-first-run", "--no-default-browser-check"])
+        return
     webbrowser.open(URL)
 
 

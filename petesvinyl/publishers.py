@@ -17,7 +17,7 @@ from typing import Any
 
 import httpx
 
-from . import config, discogs, listings
+from . import browser, config, discogs, listings
 from .config import BROWSER_PROFILE_DIR, IMAGES_DIR
 from .db import IMAGE_SLOTS
 
@@ -256,8 +256,13 @@ async def browser_assist(rec: dict[str, Any], platform: str) -> dict[str, Any]:
         if _context is None:
             _playwright = await async_playwright().start()
             BROWSER_PROFILE_DIR.mkdir(exist_ok=True)
-            _context = await _playwright.chromium.launch_persistent_context(
-                str(BROWSER_PROFILE_DIR), headless=False, viewport=None, args=["--start-maximized"])
+            options = dict(headless=False, viewport=None, args=["--start-maximized"])
+            found = browser.find_browser()
+            try:   # the same Chrome Pete already uses; fall back to the bundled Chromium if that won't start
+                _context = await _playwright.chromium.launch_persistent_context(
+                    str(BROWSER_PROFILE_DIR), **({"channel": found.channel} if found else {}), **options)
+            except Exception:  # noqa: BLE001
+                _context = await _playwright.chromium.launch_persistent_context(str(BROWSER_PROFILE_DIR), **options)
         page = await _context.new_page()
         await page.goto(listing["sell_url"], wait_until="domcontentloaded", timeout=45000)
         await page.wait_for_timeout(4000)

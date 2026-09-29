@@ -1131,7 +1131,7 @@ async function renderSettings() {
   const psState = async () => {
     try {
       const s = await api("/api/popsike/status");
-      $("#popsikeState").textContent = !s.edge_found ? "⚠️ Microsoft Edge wasn't found, so the Popsike login can't be saved."
+      $("#popsikeState").textContent = !s.browser_found ? "⚠️ Google Chrome (or Microsoft Edge) wasn't found, so the Popsike login can't be saved."
         : s.connected ? "✅ Logged in to Popsike (press Test Popsike to check it still works)." : "Not logged in yet.";
     } catch (_) { $("#popsikeState").textContent = ""; }
   };

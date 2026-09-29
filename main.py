@@ -23,7 +23,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from petesvinyl import popsike, version, activity, ai, backup, config, db, discogs, listings, publishers, valuation
+from petesvinyl import browser, popsike, version, activity, ai, backup, config, db, discogs, listings, publishers, valuation
 from petesvinyl.config import IMAGES_DIR, STATIC_DIR
 from petesvinyl.db import IMAGE_SLOTS, PLATFORMS
 
@@ -542,18 +542,9 @@ async def quit_app() -> dict[str, Any]:
     def _exit() -> None:
         db.close()
         (config.LOGS_DIR / "server.pid").unlink(missing_ok=True)
-        if sys.platform == "win32":
-            # Close the app window too: Edge was started with a private "edge_profile" folder, so this
-            # only ever matches Pete's Vinyl's own window, never his normal browser.
-            try:
-                subprocess.run(
-                    ["powershell", "-NoProfile", "-Command",
-                     "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe'\" | "
-                     "Where-Object { $_.CommandLine -like '*edge_profile*' } | "
-                     "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"],
-                    creationflags=0x08000000, timeout=15)  # 0x08000000 = no console window
-            except (OSError, subprocess.SubprocessError):
-                pass
+        # Close the app window too. It was opened with a private "app_profile" folder, so this only ever matches
+        # Pete's Vinyl's own window, never his normal browser windows.
+        browser.kill_profile_windows(["app_profile", "edge_profile"])
         os._exit(0)
 
     threading.Timer(1.5, _exit).start()  # let the reply and the "closed" page reach the browser first
@@ -577,7 +568,8 @@ def price_links(record_id: int) -> dict[str, Any]:
 
 @app.get("/api/popsike/status")
 def popsike_status() -> dict[str, Any]:
-    return {"enabled": popsike.enabled(), "connected": popsike.is_connected(), "edge_found": popsike.find_edge() is not None}
+    return {"enabled": popsike.enabled(), "connected": popsike.is_connected(), "browser_found": browser.find_browser() is not None,
+            "browser": (browser.find_browser().name if browser.find_browser() else "")}
 
 
 @app.post("/api/popsike/connect")
