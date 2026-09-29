@@ -233,6 +233,7 @@ async def identify(record_id: int) -> dict[str, Any]:
         except (ai.AIUnavailable, ValueError) as exc:
             result["error"] = str(exc)
     else:
+        activity.record("OpenRouter", "Photo reading skipped: no OpenRouter key saved in Settings", False)
         result["error"] = "No AI key set up yet, so please type the details in (or add an OpenRouter key in Settings)."
 
     matches = await discogs.search(rec)
@@ -435,6 +436,47 @@ async def backup_now() -> dict[str, Any]:
     global _last_backup
     _last_backup = time.time()
     return await asyncio.to_thread(backup.run_backup)
+
+
+@app.post("/api/test-connections")
+async def test_connections() -> dict[str, Any]:
+    """Make one harmless, free call to each service so Pete/you can see whether the keys work."""
+    import httpx
+    out: dict[str, Any] = {}
+    token = config.get("DISCOGS_API_TOKEN")
+    if not token:
+        out["discogs"] = {"ok": False, "message": "No Discogs token saved."}
+        activity.record("Discogs", "Key test skipped: no token saved", False)
+    else:
+        try:
+            async with httpx.AsyncClient(timeout=20) as c:
+                r = await c.get("https://api.discogs.com/oauth/identity", headers=discogs._headers())
+            ok = r.status_code == 200
+            who = r.json().get("username", "") if ok else r.text[:200]
+            out["discogs"] = {"ok": ok, "message": f"Connected as {who}" if ok else f"Discogs said {r.status_code}: {who}"}
+            activity.record("Discogs", "Key test (who am I?)", ok, out["discogs"]["message"])
+        except httpx.HTTPError as exc:
+            out["discogs"] = {"ok": False, "message": f"Couldn't reach Discogs: {exc}"}
+            activity.record("Discogs", "Key test", False, str(exc))
+    key = config.get("OPENROUTER_API_KEY")
+    if not key:
+        out["openrouter"] = {"ok": False, "message": "No OpenRouter key saved."}
+        activity.record("OpenRouter", "Key test skipped: no key saved", False)
+    else:
+        try:
+            async with httpx.AsyncClient(timeout=20) as c:
+                r = await c.get("https://openrouter.ai/api/v1/auth/key", headers={"Authorization": f"Bearer {key}"})
+            ok = r.status_code == 200
+            d = r.json().get("data", {}) if ok else {}
+            left = d.get("limit_remaining")
+            msg = ("Key works." + (f" Credit left: ${left:.2f}" if isinstance(left, (int, float)) else
+                   f" Used so far: ${d.get('usage', 0):.2f}")) if ok else f"OpenRouter said {r.status_code}: {r.text[:200]}"
+            out["openrouter"] = {"ok": ok, "message": msg}
+            activity.record("OpenRouter", "Key test", ok, msg)
+        except httpx.HTTPError as exc:
+            out["openrouter"] = {"ok": False, "message": f"Couldn't reach OpenRouter: {exc}"}
+            activity.record("OpenRouter", "Key test", False, str(exc))
+    return out
 
 
 @app.get("/api/activity")

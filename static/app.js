@@ -929,7 +929,9 @@ async function renderLogs() {
   const { events } = await api("/api/activity");
   app.innerHTML = `
     <div class="row" style="margin-bottom:18px"><a class="btn btn-chrome btn-small" href="#/settings">⬅ Back to settings</a>
-      <button class="btn btn-small" id="refreshLog">🔄 Refresh</button></div>
+      <button class="btn btn-small" id="refreshLog">🔄 Refresh</button>
+      <button class="btn btn-green btn-small" id="testKeys">🔌 Test my keys</button></div>
+    <div id="testResult"></div>
     <div class="panel"><h1>What has the app been doing?</h1>
       <p class="muted">Newest first. Every time the app asks Discogs, OpenRouter or eBay something, it shows up here. Red lines are problems. (Also saved in the <b>logs</b> folder as activity.log.)</p>
       ${events.length ? events.map((e) => `
@@ -939,6 +941,13 @@ async function renderLogs() {
         </div>`).join("") : "<p>Nothing yet. Look up a record and come back.</p>"}
     </div>`;
   $("#refreshLog").addEventListener("click", renderLogs);
+  $("#testKeys").addEventListener("click", async () => {
+    $("#testKeys").disabled = true;
+    const r = await api("/api/test-connections", { method: "POST" });
+    await renderLogs();
+    $("#testResult").innerHTML = `<div class="panel" style="margin-bottom:18px">${[["Discogs", r.discogs], ["OpenRouter", r.openrouter]].map(([n, x]) =>
+      `<p style="font-size:1.2rem"><b>${x.ok ? "✅" : "❌"} ${n}:</b> ${esc(x.message)}</p>`).join("")}</div>`;
+  });
 }
 
 // ------------------------------------------------------------------ start

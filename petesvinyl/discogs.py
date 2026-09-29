@@ -60,6 +60,7 @@ async def _get(path: str, params: dict[str, Any] | None = None) -> Any:
 async def search(record: dict[str, Any]) -> list[dict[str, Any]]:
     """Try the most specific search first (barcode, catalogue number), then artist + title."""
     if not is_configured():
+        activity.record("Discogs", "Search skipped: no Discogs token saved in Settings", False)
         return []
     attempts: list[dict[str, Any]] = []
     barcode = "".join(ch for ch in (record.get("barcode") or "") if ch.isdigit())
@@ -67,6 +68,8 @@ async def search(record: dict[str, Any]) -> list[dict[str, Any]]:
         attempts.append({"barcode": barcode})
     if record.get("catalog_number"):
         attempts.append({"catno": record["catalog_number"], "artist": record.get("artist", "")})
+    if not (record.get("artist") or record.get("album_title") or barcode):
+        activity.record("Discogs", "Search skipped: no artist or album typed in yet", False)
     if record.get("artist") or record.get("album_title"):
         attempts.append({"artist": record.get("artist", ""), "release_title": record.get("album_title", "")})
     for params in attempts:

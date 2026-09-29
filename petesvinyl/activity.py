@@ -15,6 +15,20 @@ _events: collections.deque = collections.deque(maxlen=300)
 _lock = threading.Lock()
 
 
+def _load_previous() -> None:
+    """Show earlier activity after a restart by reading the saved log file."""
+    try:
+        lines = (LOGS_DIR / "activity.log").read_text(encoding="utf-8").splitlines()[-100:]
+    except OSError:
+        return
+    for line in lines:
+        ok = " OK " in line[:40]
+        _events.appendleft({"time": line[:15], "source": "earlier", "what": line[15:], "ok": ok, "detail": ""})
+
+
+_load_previous()
+
+
 def record(source: str, what: str, ok: bool = True, detail: str = "") -> None:
     ev = {"time": datetime.now().strftime("%d %b %H:%M:%S"), "source": source, "what": what,
           "ok": ok, "detail": detail[:1500]}
