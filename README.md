@@ -5,8 +5,8 @@ collection. It runs on Pete's own Windows PC at <http://localhost:8000> and back
 
 **What Pete does for each record:**
 
-1. **Add a Record** → hold up the front cover, back cover and both labels to the webcam and press the big red button (or the Space bar) four times.
-2. **Check details**: the AI fills in the artist, album, **year this copy was pressed**, **where it was pressed**, label and catalogue number. Pete fixes anything wrong, leaves "I'm the first owner" ticked (or says how many owners it's had), and taps how worn the record and cover are.
+1. **Add a Record** → hold up the front cover, back cover and both labels to the webcam and press the big red button (or the Space bar) four times. Double albums and extras get their own photos: **Another record in the cover**, **Poster, insert or artwork**, **Inner sleeve**, and **Close-up of a scratch or crease**.
+2. **Check details** (also: how many records are in the cover, and focused questions on scratches, how it plays, and creases): the AI fills in the artist, album, **year this copy was pressed**, **where it was pressed**, label and catalogue number. Pete fixes anything wrong, leaves "I'm the first owner" ticked (or says how many owners it's had), and taps how worn the record and cover are.
 3. **Price**: the app checks Discogs, recent eBay sales and web research, and suggests a price. Pete can type his own.
 4. **Sell**: the best 1–4 sites are already ticked. Pressing **Get it listed!** posts automatically where the APIs are set up, and everywhere else shows a **copy-and-paste helper** (Copy Title / Copy Price / Copy Description, Open the site, Show the photos, "Fill it in for me").
 5. When it sells, he presses **💰 It sold!**, and the app reminds him to take it off the other sites.

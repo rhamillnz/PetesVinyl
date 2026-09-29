@@ -9,6 +9,7 @@ import base64
 import binascii
 import logging
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -81,6 +82,11 @@ class RecordFields(BaseModel):
     number_of_owners: Optional[int] = Field(default=None, ge=1, le=50)
     condition_media: Optional[str] = None
     condition_sleeve: Optional[str] = None
+    disc_count: Optional[int] = Field(default=None, ge=1, le=20)
+    media_scratches: Optional[str] = None      # none / light / some / deep
+    media_play: Optional[str] = None           # perfect / crackle / noisy / skips
+    cover_creases: Optional[str] = None        # none / slight / noticeable / bad
+    cover_issues: Optional[list[str]] = None   # seam_split, ring_wear, writing, stain, tear
     notes: Optional[str] = None
     discogs_release_id: Optional[str] = None
     suggested_price: Optional[float] = None
@@ -89,6 +95,8 @@ class RecordFields(BaseModel):
 class RecordIn(RecordFields):
     # Base64 JPEG frames (data URLs are fine) keyed front / back / disc_a / disc_b.
     images: dict[str, str] = Field(default_factory=dict)
+    # Names for extra photos, e.g. {"extra_1": "Disc 2 - Side A label"}
+    extra_labels: dict[str, str] = Field(default_factory=dict)
 
 
 class ValueRequest(BaseModel):
@@ -130,14 +138,25 @@ def _require(record_id: int) -> dict[str, Any]:
     return rec
 
 
-def _save_images(record_id: int, images: dict[str, str]) -> dict[str, str]:
-    """Decode base64 frames and write them to images/record_<id>/<slot>_<time>.jpg."""
+EXTRA_KEY = re.compile(r"^extra_\d{1,3}$")
+
+
+def _save_images(record_id: int, images: dict[str, str], labels: dict[str, str] | None = None) -> dict[str, Any]:
+    """Decode base64 frames and write them to images/record_<id>/<slot>_<time>.jpg.
+
+    The four standard slots (front/back/disc_a/disc_b) map to their own columns; any number of extra
+    photos (more discs, inserts, artwork, close-ups) are keyed extra_1, extra_2... and kept in extra_images.
+    """
+    labels = labels or {}
     folder = IMAGES_DIR / f"record_{record_id}"
     folder.mkdir(parents=True, exist_ok=True)
     existing = db.get_record(record_id) or {}
-    saved: dict[str, str] = {}
+    extras = {e["key"]: dict(e) for e in existing.get("extra_images") or [] if e.get("key")}
+    saved: dict[str, Any] = {}
+    extras_changed = False
     for slot, data in images.items():
-        if slot not in IMAGE_SLOTS or not data:
+        is_extra = bool(EXTRA_KEY.match(slot))
+        if (slot not in IMAGE_SLOTS and not is_extra) or not data:
             continue
         if "," in data[:100]:
             data = data.split(",", 1)[1]
@@ -147,10 +166,18 @@ def _save_images(record_id: int, images: dict[str, str]) -> dict[str, str]:
             raise HTTPException(400, f"Photo '{slot}' isn't valid base64") from exc
         rel = f"record_{record_id}/{slot}_{int(time.time() * 1000)}.jpg"
         (IMAGES_DIR / rel).write_bytes(raw)
-        old = existing.get(IMAGE_SLOTS[slot])
+        if is_extra:
+            old = (extras.get(slot) or {}).get("path")
+            label = (labels.get(slot) or (extras.get(slot) or {}).get("label") or "Extra photo").strip()[:80]
+            extras[slot] = {"key": slot, "path": rel, "label": label}
+            extras_changed = True
+        else:
+            old = existing.get(IMAGE_SLOTS[slot])
+            saved[IMAGE_SLOTS[slot]] = rel
         if old and old != rel:
             (IMAGES_DIR / old).unlink(missing_ok=True)
-        saved[IMAGE_SLOTS[slot]] = rel
+    if extras_changed:
+        saved["extra_images"] = sorted(extras.values(), key=lambda e: int(e["key"].split("_")[1]))
     return saved
 
 
@@ -181,12 +208,12 @@ def get_record(record_id: int) -> dict[str, Any]:
 
 @app.post("/api/records")
 def create_record(body: RecordIn) -> dict[str, Any]:
-    fields = body.model_dump(exclude={"images"}, exclude_none=True)
+    fields = body.model_dump(exclude={"images", "extra_labels"}, exclude_none=True)
     fields.setdefault("is_first_owner", True)
     fields.setdefault("number_of_owners", 1)
     record_id = db.create_record(fields)
     if body.images:
-        db.update_record(record_id, _save_images(record_id, body.images))
+        db.update_record(record_id, _save_images(record_id, body.images, body.extra_labels))
     mark_changed()
     return _require(record_id)
 
@@ -194,11 +221,11 @@ def create_record(body: RecordIn) -> dict[str, Any]:
 @app.put("/api/records/{record_id}")
 def update_record(record_id: int, body: RecordIn) -> dict[str, Any]:
     _require(record_id)
-    fields = body.model_dump(exclude={"images"}, exclude_none=True)
+    fields = body.model_dump(exclude={"images", "extra_labels"}, exclude_none=True)
     if fields.get("is_first_owner") and "number_of_owners" not in fields:
         fields["number_of_owners"] = 1
     if body.images:
-        fields.update(_save_images(record_id, body.images))
+        fields.update(_save_images(record_id, body.images, body.extra_labels))
     db.update_record(record_id, fields)
     mark_changed()
     return _require(record_id)
@@ -209,9 +236,25 @@ def delete_record(record_id: int) -> dict[str, Any]:
     rec = _require(record_id)
     for path in _image_files(rec).values():
         path.unlink(missing_ok=True)
+    for extra in rec.get("extra_images") or []:
+        (IMAGES_DIR / extra.get("path", "")).unlink(missing_ok=True)
     db.delete_record(record_id)
     mark_changed()
     return {"ok": True}
+
+
+@app.delete("/api/records/{record_id}/extra/{key}")
+def delete_extra_photo(record_id: int, key: str) -> dict[str, Any]:
+    rec = _require(record_id)
+    keep = []
+    for extra in rec.get("extra_images") or []:
+        if extra.get("key") == key:
+            (IMAGES_DIR / extra.get("path", "")).unlink(missing_ok=True)
+        else:
+            keep.append(extra)
+    db.update_record(record_id, {"extra_images": keep})
+    mark_changed()
+    return _require(record_id)
 
 
 # --------------------------------------------------------------------------- identification
@@ -492,9 +535,21 @@ async def quit_app() -> dict[str, Any]:
     def _exit() -> None:
         db.close()
         (config.LOGS_DIR / "server.pid").unlink(missing_ok=True)
+        if sys.platform == "win32":
+            # Close the app window too: Edge was started with a private "edge_profile" folder, so this
+            # only ever matches Pete's Vinyl's own window, never his normal browser.
+            try:
+                subprocess.run(
+                    ["powershell", "-NoProfile", "-Command",
+                     "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe'\" | "
+                     "Where-Object { $_.CommandLine -like '*edge_profile*' } | "
+                     "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"],
+                    creationflags=0x08000000, timeout=15)  # 0x08000000 = no console window
+            except (OSError, subprocess.SubprocessError):
+                pass
         os._exit(0)
 
-    threading.Timer(0.8, _exit).start()  # let this reply reach the browser first
+    threading.Timer(1.5, _exit).start()  # let the reply and the "closed" page reach the browser first
     return {"ok": True, "message": message}
 
 

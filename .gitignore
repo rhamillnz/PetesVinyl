@@ -12,3 +12,4 @@ logs/
 browser_profile/
 *.db-wal
 *.db-shm
+edge_profile/

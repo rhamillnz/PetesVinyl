@@ -35,6 +35,10 @@ def image_paths(rec: dict[str, Any]) -> list[Path]:
             p = IMAGES_DIR / rec[col]
             if p.exists():
                 paths.append(p)
+    for extra in rec.get("extra_images") or []:
+        p = IMAGES_DIR / (extra.get("path") or "")
+        if extra.get("path") and p.exists():
+            paths.append(p)
     return paths
 
 

@@ -35,7 +35,9 @@ def open_browser() -> None:
     ]
     for path in edge_paths:
         if path and os.path.exists(path):
-            subprocess.Popen([path, f"--app={URL}", "--start-maximized"])
+            # Its own private profile, so the Stop button can close exactly this window and nothing else.
+            subprocess.Popen([path, f"--app={URL}", "--start-maximized", f"--user-data-dir={BASE / 'edge_profile'}",
+                              "--no-first-run", "--no-default-browser-check"])
             return
     webbrowser.open(URL)
 

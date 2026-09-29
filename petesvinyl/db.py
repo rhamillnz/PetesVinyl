@@ -32,6 +32,12 @@ COLUMNS: list[tuple[str, str]] = [
     ("number_of_owners", "INTEGER DEFAULT 1"),
     ("condition_media", "TEXT DEFAULT 'VG+'"),
     ("condition_sleeve", "TEXT DEFAULT 'VG+'"),
+    ("disc_count", "INTEGER DEFAULT 1"),
+    ("media_scratches", "TEXT DEFAULT ''"),
+    ("media_play", "TEXT DEFAULT ''"),
+    ("cover_creases", "TEXT DEFAULT ''"),
+    ("cover_issues", "TEXT DEFAULT '[]'"),
+    ("extra_images", "TEXT DEFAULT '[]'"),
     ("notes", "TEXT DEFAULT ''"),
     ("ai_summary", "TEXT DEFAULT ''"),
     ("discogs_release_id", "TEXT DEFAULT ''"),
@@ -61,7 +67,7 @@ COLUMNS: list[tuple[str, str]] = [
     ("updated_at", "TEXT"),
 ]
 COLUMN_NAMES = {name for name, _ in COLUMNS}
-JSON_COLUMNS = {"recommended_platforms", "listing_links"}
+JSON_COLUMNS = {"recommended_platforms", "listing_links", "cover_issues", "extra_images"}
 
 _lock = threading.RLock()
 _conn: sqlite3.Connection | None = None
@@ -112,6 +118,9 @@ def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     rec["is_first_owner"] = bool(rec.get("is_first_owner"))
     rec["state"] = record_state(rec)
     rec["images"] = {slot: _image_url(rec.get(col)) for slot, col in IMAGE_SLOTS.items()}
+    rec["extras"] = [{"key": e.get("key"), "label": e.get("label") or "Extra photo", "url": _image_url(e.get("path"))}
+                     for e in rec.get("extra_images") or [] if e.get("path")]
+    rec["disc_count"] = rec.get("disc_count") or 1
     return rec
 
 

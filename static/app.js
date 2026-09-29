@@ -104,6 +104,13 @@ const CONDITIONS = [
   ["G+", "Well played", "Noticeable noise"],
   ["G", "Rough", "Heavily played"],
 ];
+const COVER_CONDITIONS = [
+  ["NM", "Like new", "Crisp and clean"],
+  ["VG+", "Very good", "Light wear"],
+  ["VG", "Good", "Some wear"],
+  ["G+", "Well worn", "Noticeable wear"],
+  ["G", "Rough", "Heavy wear"],
+];
 const STATE_LABEL = { collection: "In my collection", ready: "Ready to list", for_sale: "For sale", sold: "Sold" };
 const STATUS_WORDS = { not_listed: "Not listed", ready: "Ready to paste", draft: "Draft saved", listed: "For sale ✅", sold: "Sold 🎉", ended: "Taken down" };
 let platformsCache = null;
@@ -153,7 +160,16 @@ $("#quitBtn").addEventListener("click", async () => {
   if (!(await confirmBox("Close Pete's Vinyl?", "Yes, close it", true))) return;
   toast("Saving a backup and closing…");
   let note = "";
-  try { note = (await api("/api/quit", { method: "POST" })).message || ""; } catch (_) { /* server is already going away */ }
+  try {
+    note = (await api("/api/quit", { method: "POST" })).message || "";
+  } catch (e) {
+    // A network error (TypeError) means the server has already gone, which is what we wanted.
+    // Any other error means it did NOT close, so say so instead of pretending.
+    if (!(e instanceof TypeError)) {
+      toast(`It didn't close: ${e.message}. This may be an older copy of the app. Run Stop_PetesVinyl.bat instead.`, true);
+      return;
+    }
+  }
   document.body.innerHTML = `
     <main style="min-height:100vh;display:grid;place-items:center;text-align:center">
       <div class="panel" style="max-width:640px">
@@ -317,7 +333,15 @@ const SLOTS = [
 async function renderPhotos(id) {
   const rec = id ? await api(`/api/records/${id}`) : null;
   const shots = {};          // new photos taken this visit (data URLs)
-  const existing = rec ? rec.images : {};
+  const existing = { ...(rec ? rec.images : {}) };
+  const slots = [...SLOTS];  // the four standard photos, plus any extras (more discs, inserts, close-ups)
+  let extraSeq = 0;
+  let discCount = rec ? rec.disc_count : 1;
+  ((rec && rec.extras) || []).forEach((e) => {
+    extraSeq = Math.max(extraSeq, Number(e.key.split("_")[1]));
+    slots.push({ key: e.key, label: e.label, say: e.label, tip: "Tap the red button to retake this photo.", icon: "📷", extra: true });
+    existing[e.key] = e.url;
+  });
   let current = 0;
   let stream = null;
 
@@ -331,6 +355,13 @@ async function renderPhotos(id) {
           <div class="camera-msg" id="camMsg">Starting the camera…</div>
         </div>
         <div class="thumbs" id="thumbs"></div>
+        <div class="extras-bar">
+          <span class="label">More to photograph?</span>
+          <button class="btn btn-chrome btn-small" data-extra="disc">💿 Another record in the cover</button>
+          <button class="btn btn-chrome btn-small" data-extra="art">🖼️ Poster, insert or artwork</button>
+          <button class="btn btn-chrome btn-small" data-extra="inner">📄 Inner sleeve</button>
+          <button class="btn btn-chrome btn-small" data-extra="damage">🔍 Close-up of a scratch or crease</button>
+        </div>
       </div>
       <div class="panel">
         <div class="instruction" id="instruction"></div>
@@ -346,28 +377,64 @@ async function renderPhotos(id) {
       </div>
     </div>`;
 
+  function addExtra(kind) {
+    const add = (label, say, tip, icon) => {
+      extraSeq += 1;
+      slots.push({ key: `extra_${extraSeq}`, label, say, tip, icon, extra: true });
+      current = slots.length - 1;
+    };
+    if (kind === "disc") {
+      discCount += 1;
+      add(`Disc ${discCount} - Side A`, `DISC ${discCount}, SIDE A label`, "Take the next record out of the cover and show the Side A label.", "💿");
+      add(`Disc ${discCount} - Side B`, `DISC ${discCount}, SIDE B label`, "Flip it over and show the Side B label.", "💿");
+      current = slots.length - 2;
+    } else if (kind === "art") {
+      add("Poster / insert / artwork", "the POSTER, INSERT or ARTWORK", "Show anything extra that came with the record: poster, booklet, lyric sheet or printed inner.", "🖼️");
+    } else if (kind === "inner") {
+      add("Inner sleeve", "the INNER SLEEVE", "Show the paper or plastic sleeve the record sits in.", "📄");
+    } else {
+      add("Close-up of damage", "a CLOSE-UP of the scratch or crease", "Hold the damage close to the camera in good light so buyers can see exactly what it is.", "🔍");
+    }
+    paint();
+  }
+  // Give the keyboard back to the camera afterwards, so Space takes the photo instead of pressing this button again.
+  $$("[data-extra]").forEach((b) => b.addEventListener("click", () => { addExtra(b.dataset.extra); b.blur(); }));
+
+  async function removeCurrentExtra() {
+    const slot = slots[current];
+    if (!slot.extra) return;
+    if (existing[slot.key] && !(await confirmBox(`Delete the photo "${slot.label}" for good?`, "Yes, delete it", true))) return;
+    if (existing[slot.key] && id) await api(`/api/records/${id}/extra/${slot.key}`, { method: "DELETE" });
+    delete existing[slot.key]; delete shots[slot.key];
+    slots.splice(current, 1);
+    current = Math.min(current, slots.length - 1);
+    paint();
+  }
+
   function paint() {
-    const slot = SLOTS[current];
+    const slot = slots[current];
     $("#instruction").innerHTML = `
-      <div class="muted" style="color:#6b4a2a;font-weight:700">Photo ${current + 1} of 4</div>
+      <div class="muted" style="color:#6b4a2a;font-weight:700">Photo ${current + 1} of ${slots.length}</div>
       <div class="which">${slot.icon} Show me ${esc(slot.say)}</div>
-      <div style="margin-top:8px;font-size:1.05rem">${esc(slot.tip)}</div>`;
-    $("#thumbs").innerHTML = SLOTS.map((s, i) => {
+      <div style="margin-top:8px;font-size:1.05rem">${esc(slot.tip)}</div>
+      ${slot.extra ? `<button type="button" class="btn btn-ghost btn-small" id="dropExtra" style="margin-top:10px;color:#6b1a10;border-color:#6b1a10">✕ I don't need this photo</button>` : ""}`;
+    if (slot.extra) $("#dropExtra").addEventListener("click", removeCurrentExtra);
+    $("#thumbs").innerHTML = slots.map((s, i) => {
       const url = shots[s.key] || existing[s.key];
       return `<button class="thumb ${i === current ? "active" : ""} ${url ? "has" : ""}" data-i="${i}" title="${url ? "Click to retake" : "Click to take this one"}">
         <span class="pic">${url ? `<img src="${esc(url)}" alt="">` : s.icon}</span>
         <span class="lbl">${url ? "✓ " : ""}${s.label}</span></button>`;
     }).join("");
-    $$(".thumb").forEach((b) => b.addEventListener("click", () => { current = Number(b.dataset.i); paint(); }));
+    $$(".thumb").forEach((b) => b.addEventListener("click", () => { current = Number(b.dataset.i); paint(); b.blur(); }));
     const haveFront = shots.front || existing.front;
     $("#next").disabled = !haveFront && !Object.keys(shots).length;
   }
 
   function addShot(dataUrl) {
-    shots[SLOTS[current].key] = dataUrl;
-    const nextEmpty = SLOTS.findIndex((s) => !shots[s.key] && !existing[s.key]);
+    shots[slots[current].key] = dataUrl;
+    const nextEmpty = slots.findIndex((s) => !shots[s.key] && !existing[s.key]);
     if (nextEmpty === -1) {
-      toast("All four photos done! Press the green button when you're ready.");
+      toast("All the photos are done! Add more if there's another record or a poster, or press the green button.");
       $("#next").focus();
     } else {
       current = nextEmpty;
@@ -418,16 +485,17 @@ async function renderPhotos(id) {
   };
   document.addEventListener("keydown", onKey);
 
+  const labelsFor = () => Object.fromEntries(slots.filter((x) => x.extra && shots[x.key]).map((x) => [x.key, x.label]));
   $("#next").addEventListener("click", async () => {
     const btn = $("#next");
     btn.disabled = true; btn.textContent = "Saving…";
     try {
       if (id) {
-        if (Object.keys(shots).length) await api(`/api/records/${id}`, { method: "PUT", body: { images: shots } });
+        if (Object.keys(shots).length || discCount !== rec.disc_count) await api(`/api/records/${id}`, { method: "PUT", body: { images: shots, extra_labels: labelsFor(), disc_count: discCount } });
         toast("Photos saved.");
         location.hash = `#/record/${id}`;
       } else {
-        const created = await api("/api/records", { method: "POST", body: { images: shots, is_first_owner: true } });
+        const created = await api("/api/records", { method: "POST", body: { images: shots, extra_labels: labelsFor(), disc_count: discCount, is_first_owner: true } });
         flags.identify.add(created.id);
         location.hash = `#/record/${created.id}/details`;
       }
@@ -500,11 +568,18 @@ function paintDetails(id, rec, aiInfo, matches) {
     <div class="field"><label for="f_${key}">${label}</label>
       <input type="text" id="f_${key}" name="${key}" value="${esc(rec[key])}">
       ${hint ? `<span class="hint">${hint}</span>` : ""}</div>`;
-  const condPicker = (key, label) => `
+  const condPicker = (key, label, options = CONDITIONS) => `
     <div class="field"><span class="label">${label}</span>
-      <div class="choices" data-cond="${key}">${CONDITIONS.map(([code, word, sub]) =>
+      <div class="choices" data-cond="${key}">${options.map(([code, word, sub]) =>
         `<button type="button" class="choice" data-code="${code}" aria-pressed="${(rec[key] || "VG+") === code}">${word}<small>${sub}</small></button>`).join("")}</div></div>`;
 
+  const choiceGroup = (key, label, options) => `
+    <div class="field"><span class="label">${label}</span>
+      <div class="choices" data-cond="${key}">${options.map(([code, word, sub]) =>
+        `<button type="button" class="choice" data-code="${code}" aria-pressed="${rec[key] === code}">${word}<small>${sub}</small></button>`).join("")}</div></div>`;
+  const issueChips = ISSUE_OPTIONS.map(([code, word]) =>
+    `<button type="button" class="choice chip" data-issue="${code}" aria-pressed="${(rec.cover_issues || []).includes(code)}">${word}</button>`).join("");
+  detailsDiscs = rec.disc_count || 1;
   let aiBox = "";
   if (aiInfo && aiInfo.error) {
     aiBox = `<div class="ai-box warn"><span class="icon">✍️</span><div>${esc(aiInfo.error)}</div></div>`;
@@ -534,8 +609,23 @@ function paintDetails(id, rec, aiInfo, matches) {
             <button type="button" class="btn btn-small" id="ownPlus" aria-label="More">+</button>
           </div>
         </div>
-        ${condPicker("condition_media", "How does the RECORD look?")}
-        ${condPicker("condition_sleeve", "How does the COVER look?")}
+        <div class="field"><span class="label">How many records are in the cover?</span>
+          <div class="stepper">
+            <button type="button" class="btn btn-small" id="discMinus" aria-label="Fewer">−</button>
+            <span class="val" id="discVal">${detailsDiscs}</span>
+            <button type="button" class="btn btn-small" id="discPlus" aria-label="More">+</button>
+          </div>
+          <span class="hint">A double album has 2. Take a photo of each disc's labels on the photos step.</span></div>
+        <div class="cond-block"><h3>💿 The RECORD (the vinyl itself)</h3>
+          ${choiceGroup("media_scratches", "Is it scratched?", [["none", "Not at all", "Looks clean"], ["light", "A little", "Hairline marks"], ["some", "Some", "Visible scratches"], ["deep", "Badly", "You can feel them"]])}
+          ${choiceGroup("media_play", "How does it play?", [["perfect", "Perfectly", "Silent"], ["crackle", "Slight crackle", "A little noise"], ["noisy", "Noisy", "Clicks and pops"], ["skips", "Skips", "Jumps or repeats"]])}
+          ${condPicker("condition_media", "Overall grade (picked for you, change it if you like)")}
+        </div>
+        <div class="cond-block"><h3>🖼️ The COVER (dust cover / sleeve)</h3>
+          ${choiceGroup("cover_creases", "Is it creased?", [["none", "Not at all", "Flat and crisp"], ["slight", "Slightly", "Small creases"], ["noticeable", "Noticeably", "Clear creases"], ["bad", "Badly", "Heavily creased"]])}
+          <div class="field"><span class="label">Anything else wrong with the cover?</span><div class="choices">${issueChips}</div></div>
+          ${condPicker("condition_sleeve", "Overall grade (picked for you, change it if you like)", COVER_CONDITIONS)}
+        </div>
         <details class="more"><summary>More details (optional)</summary>
           <div class="form-grid">
             ${field("label", "Record label")}
@@ -568,9 +658,16 @@ function paintDetails(id, rec, aiInfo, matches) {
   $("#firstOwner").addEventListener("change", (e) => $("#ownersField").classList.toggle("hidden", e.target.checked));
   $("#ownMinus").addEventListener("click", () => { owners = Math.max(2, owners - 1); $("#ownVal").textContent = owners; });
   $("#ownPlus").addEventListener("click", () => { owners = Math.min(20, owners + 1); $("#ownVal").textContent = owners; });
-  $$(".choices").forEach((group) => group.addEventListener("click", (e) => {
+  $("#discMinus").addEventListener("click", () => { detailsDiscs = Math.max(1, detailsDiscs - 1); $("#discVal").textContent = detailsDiscs; });
+  $("#discPlus").addEventListener("click", () => { detailsDiscs = Math.min(20, detailsDiscs + 1); $("#discVal").textContent = detailsDiscs; });
+  $$(".choices[data-cond]").forEach((group) => group.addEventListener("click", (e) => {
     const b = e.target.closest(".choice"); if (!b) return;
     $$(".choice", group).forEach((x) => x.setAttribute("aria-pressed", x === b));
+    autoGrade();
+  }));
+  $$(".chip").forEach((chip) => chip.addEventListener("click", () => {
+    chip.setAttribute("aria-pressed", chip.getAttribute("aria-pressed") !== "true");
+    autoGrade();
   }));
   $$("[data-photo]").forEach((b) => b.addEventListener("click", () => showPhoto(b.dataset.photo)));
   bindMatches(id);
@@ -623,12 +720,38 @@ function bindMatches(id) {
   }));
 }
 
+let detailsDiscs = 1;
+const ISSUE_OPTIONS = [["seam_split", "Split seam"], ["ring_wear", "Ring wear"], ["writing", "Writing or stamp"], ["stain", "Stain or mould"], ["tear", "Tear"]];
+const SCRATCH_W = { none: "no scratches", light: "light scratches", some: "some scratches", deep: "deep scratches" };
+const PLAY_W = { perfect: "plays perfectly", crackle: "slight crackle", noisy: "noisy (clicks and pops)", skips: "skips" };
+const CREASE_W = { none: "no creases", slight: "slight creasing", noticeable: "noticeable creases", bad: "heavily creased" };
+const ISSUE_W = Object.fromEntries(ISSUE_OPTIONS.map(([c, w]) => [c, w.toLowerCase()]));
+
+// Suggest the overall grades from the scratch / play / crease answers (Pete can still tap a different grade).
+function autoGrade() {
+  const pressed = (k) => { const g = $(`.choices[data-cond="${k}"]`); const b = g && $(".choice[aria-pressed='true']", g); return b ? b.dataset.code : ""; };
+  const setGrade = (key, code) => $$(`.choices[data-cond="${key}"] .choice`).forEach((x) => x.setAttribute("aria-pressed", x.dataset.code === code));
+  const sc = { none: 0, light: 1, some: 2, deep: 3 }[pressed("media_scratches")];
+  const pl = { perfect: 0, crackle: 1, noisy: 2, skips: 4 }[pressed("media_play")];
+  if (sc !== undefined && pl !== undefined) {
+    const t = sc + pl;
+    setGrade("condition_media", t === 0 ? "NM" : t <= 2 ? "VG+" : t <= 4 ? "VG" : t <= 6 ? "G+" : "G");
+  }
+  const cr = { none: 0, slight: 1, noticeable: 2, bad: 3 }[pressed("cover_creases")];
+  if (cr !== undefined) {
+    const t = cr + Math.min($$(".chip[aria-pressed='true']").length, 3) * 0.5;
+    setGrade("condition_sleeve", t === 0 ? "NM" : t <= 1.5 ? "VG+" : t <= 2.5 ? "VG" : t <= 3.5 ? "G+" : "G");
+  }
+}
+
 async function saveDetails(id, owners) {
   const form = $("#detailsForm");
   const body = {};
   $$("input[name], textarea[name]", form).forEach((el) => { body[el.name] = el.value.trim(); });
   body.is_first_owner = $("#firstOwner").checked;
   body.number_of_owners = body.is_first_owner ? 1 : owners;
+  body.disc_count = detailsDiscs;
+  body.cover_issues = $$(".chip[aria-pressed='true']", form).map((b) => b.dataset.issue);
   $$(".choices", form).forEach((g) => {
     const on = $(".choice[aria-pressed='true']", g);
     if (on) body[g.dataset.cond] = on.dataset.code;
@@ -829,7 +952,8 @@ async function renderRecord(id) {
       <div class="panel">
         <div class="photos-big">${SLOTS.map((s) => rec.images[s.key]
           ? `<button data-photo="${esc(rec.images[s.key])}" title="Click to make bigger"><img src="${esc(rec.images[s.key])}" alt="${s.label}"></button>`
-          : `<button disabled><span class="none">No ${s.label.toLowerCase()}</span></button>`).join("")}</div>
+          : `<button disabled><span class="none">No ${s.label.toLowerCase()}</span></button>`).join("")}
+          ${(rec.extras || []).map((e) => `<button data-photo="${esc(e.url)}" title="Click to make bigger"><img src="${esc(e.url)}" alt="${esc(e.label)}"><span class="cap">${esc(e.label)}</span></button>`).join("")}</div>
         <div class="row" style="margin-top:16px"><a class="btn btn-chrome btn-small" href="#/record/${id}/photos">📷 Retake photos</a></div>
       </div>
       <div class="panel">
@@ -843,7 +967,10 @@ async function renderRecord(id) {
           ${row("Label", rec.label)}
           ${row("Catalogue number", rec.catalog_number)}
           <tr><th>Owners</th><td>${rec.is_first_owner ? "Just me - I bought it new" : `${rec.number_of_owners} owners`}</td></tr>
+          ${rec.disc_count > 1 ? `<tr><th>Records in cover</th><td>${rec.disc_count} (a ${rec.disc_count}-record set)</td></tr>` : ""}
           <tr><th>Condition</th><td>Record: ${esc(condWord(rec.condition_media))} · Cover: ${esc(condWord(rec.condition_sleeve))}</td></tr>
+          ${row("The record", [SCRATCH_W[rec.media_scratches], PLAY_W[rec.media_play]].filter(Boolean).join(", "))}
+          ${row("The cover", [CREASE_W[rec.cover_creases], ...(rec.cover_issues || []).map((i) => ISSUE_W[i])].filter(Boolean).join(", "))}
           <tr><th>Suggested price</th><td style="font-size:1.5rem">${money(rec.suggested_price)}</td></tr>
         </table>
         ${active.length ? `<h3>Where it's listed</h3><ul class="status-list">${active.map((p) => {

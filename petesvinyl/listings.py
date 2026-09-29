@@ -61,6 +61,13 @@ CONDITION_WORDS = {
 }
 
 
+COVER_GRADE_WORDS = {
+    "M": "Mint", "NM": "Near Mint - like new", "VG+": "Very Good Plus - light wear",
+    "VG": "Very Good - some wear", "G+": "Good Plus - noticeable wear", "G": "Good - heavy wear",
+    "F": "Fair", "P": "Poor",
+}
+
+
 def enabled_platforms() -> list[str]:
     raw = config.get("ENABLED_PLATFORMS")
     return [p.strip() for p in raw.split(",") if p.strip() in PLATFORMS]
@@ -90,8 +97,44 @@ def platform_currency(platform: str) -> str:
     return config.get("HOME_CURRENCY")
 
 
+SCRATCH_WORDS = {"none": "no visible scratches", "light": "light hairline scratches only",
+                 "some": "some visible scratches", "deep": "deep scratches you can feel"}
+PLAY_WORDS = {"perfect": "plays perfectly, no surface noise", "crackle": "plays with slight surface crackle",
+              "noisy": "plays with noticeable clicks and pops", "skips": "skips or jumps in places"}
+CREASE_WORDS = {"none": "no creases", "slight": "slight creasing", "noticeable": "noticeable creases",
+                "bad": "heavy creasing"}
+COVER_ISSUE_WORDS = {"seam_split": "split seam", "ring_wear": "ring wear", "writing": "writing or stamp on cover",
+                     "stain": "water stain or mould", "tear": "tear"}
+
+
+def _sentence(parts: list[str]) -> str:
+    parts = [p for p in parts if p]
+    return (parts[0][0].upper() + parts[0][1:] + (", " + ", ".join(parts[1:]) if len(parts) > 1 else "") + ".") if parts else ""
+
+
+def condition_lines(rec: dict[str, Any]) -> list[str]:
+    """Plain-English condition, focused on scratches / how it plays (record) and creases / damage (cover)."""
+    media = CONDITION_WORDS.get(rec.get("condition_media") or "VG+", rec.get("condition_media") or "")
+    cover = COVER_GRADE_WORDS.get(rec.get("condition_sleeve") or "VG+", rec.get("condition_sleeve") or "")
+    lines = [f"Record condition: {media}"]
+    detail = _sentence([SCRATCH_WORDS.get(rec.get("media_scratches") or "", ""), PLAY_WORDS.get(rec.get("media_play") or "", "")])
+    if detail:
+        lines.append(f"  {detail}")
+    lines.append(f"Cover condition: {cover}")
+    issues = [COVER_ISSUE_WORDS[i] for i in rec.get("cover_issues") or [] if i in COVER_ISSUE_WORDS]
+    detail = _sentence([CREASE_WORDS.get(rec.get("cover_creases") or "", "")] + issues)
+    if detail:
+        lines.append(f"  {detail}")
+    return lines
+
+
+def disc_label(rec: dict[str, Any]) -> str:
+    n = int(rec.get("disc_count") or 1)
+    return "Vinyl LP" if n == 1 else {2: "Double LP", 3: "Triple LP"}.get(n, f"{n}xLP") + " Vinyl"
+
+
 def make_title(rec: dict[str, Any], max_len: int) -> str:
-    bits = [f"{rec.get('artist') or 'Unknown'} - {rec.get('album_title') or 'Untitled'}", "Vinyl LP"]
+    bits = [f"{rec.get('artist') or 'Unknown'} - {rec.get('album_title') or 'Untitled'}", disc_label(rec)]
     if rec.get("year_pressed"):
         bits.append(str(rec["year_pressed"]))
     if rec.get("pressing_location"):
@@ -121,11 +164,14 @@ def make_description(rec: dict[str, Any], platform: str) -> str:
     for label, value in details:
         if value:
             lines.append(f"{label}: {value}")
-    lines += [
-        "",
-        f"Record condition: {CONDITION_WORDS.get(rec.get('condition_media') or 'VG+', rec.get('condition_media'))}",
-        f"Sleeve condition: {CONDITION_WORDS.get(rec.get('condition_sleeve') or 'VG+', rec.get('condition_sleeve'))}",
-    ]
+    discs = int(rec.get("disc_count") or 1)
+    if discs > 1:
+        lines += ["", f"This is a {discs}-record set: all {discs} discs are included in the cover."]
+    extras = [e.get("label") for e in rec.get("extra_images") or [] if e.get("label")]
+    inserts = [x for x in extras if not x.lower().startswith("disc")]
+    if inserts:
+        lines.append("Photos also show: " + ", ".join(dict.fromkeys(inserts)) + ".")
+    lines += ["", *condition_lines(rec)]
     owners = rec.get("number_of_owners") or 1
     if rec.get("is_first_owner") or owners == 1:
         lines.append("One owner from new - I bought this record myself and have looked after it.")
@@ -133,7 +179,7 @@ def make_description(rec: dict[str, Any], platform: str) -> str:
         lines.append(f"This copy has had {owners} owners.")
     if rec.get("notes"):
         lines += ["", str(rec["notes"])]
-    lines += ["", "Photos are of the actual record you will receive (front, back and both labels)."]
+    lines += ["", "Photos are of the actual record(s) you will receive."]
     ship = config.get("SHIPPING_NOTE")
     if ship:
         lines += ["", ship]
