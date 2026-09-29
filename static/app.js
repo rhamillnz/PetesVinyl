@@ -421,13 +421,19 @@ async function renderDetails(id) {
   let aiInfo = null;
   let matches = [];
   let rec;
+  let pre = null;
+  if (!flags.identify.has(id)) {
+    // Photos but no name yet (e.g. opened from the record page)? Let the AI have a look automatically.
+    pre = await api(`/api/records/${id}`);
+    if (!pre.artist && !pre.album_title && pre.images.front && !pre.ai_summary) flags.identify.add(id);
+  }
   if (flags.identify.has(id)) {
     flags.identify.delete(id);
     app.innerHTML = stepsBar(id, "details") + loadingHTML("Having a good look at your record… this can take up to a minute.");
     const res = await api(`/api/records/${id}/identify`, { method: "POST" });
     rec = res.record; aiInfo = res.ai; matches = res.discogs_matches || [];
   } else {
-    rec = await api(`/api/records/${id}`);
+    rec = pre;
   }
   paintDetails(id, rec, aiInfo, matches);
 }
@@ -494,6 +500,7 @@ function paintDetails(id, rec, aiInfo, matches) {
         <p class="muted">These are records on Discogs that match. Tap the one that looks like yours to fill in the details.</p>
         <div id="matchArea">${matchesHTML(matches, rec)}</div>
         <button class="btn btn-small btn-chrome" id="findMatches">🔍 Search Discogs again</button>
+        <button class="btn btn-small btn-chrome" id="askAI">🤖 Read the photos again</button>
         <div class="photos-big" style="margin-top:22px">${SLOTS.map((s) => rec.images[s.key]
           ? `<button type="button" data-photo="${esc(rec.images[s.key])}"><img src="${esc(rec.images[s.key])}" alt="${s.label}"></button>`
           : `<button type="button" disabled><span class="none">No ${s.label.toLowerCase()}</span></button>`).join("")}</div>
@@ -510,6 +517,11 @@ function paintDetails(id, rec, aiInfo, matches) {
   }));
   $$("[data-photo]").forEach((b) => b.addEventListener("click", () => showPhoto(b.dataset.photo)));
   bindMatches(id);
+  $("#askAI").addEventListener("click", async () => {
+    await saveDetails(id, owners);
+    flags.identify.add(id);
+    renderDetails(id);
+  });
   $("#findMatches").addEventListener("click", async () => {
     await saveDetails(id, owners);
     $("#matchArea").innerHTML = loadingHTML("Searching Discogs…");
@@ -942,11 +954,19 @@ async function renderLogs() {
     </div>`;
   $("#refreshLog").addEventListener("click", renderLogs);
   $("#testKeys").addEventListener("click", async () => {
-    $("#testKeys").disabled = true;
-    const r = await api("/api/test-connections", { method: "POST" });
+    const btn = $("#testKeys");
+    btn.disabled = true; btn.textContent = "Testing…";
+    let html;
+    try {
+      const r = await api("/api/test-connections", { method: "POST" });
+      html = [["Discogs", r.discogs], ["OpenRouter", r.openrouter]].map(([n, x]) =>
+        `<p style="font-size:1.2rem"><b>${x.ok ? "✅" : "❌"} ${n}:</b> ${esc(x.message)}</p>`).join("");
+    } catch (e) {
+      html = `<p style="font-size:1.2rem"><b>❌ The test couldn't run:</b> ${esc(e.message)}<br>
+        <span class="muted">If it says "Not Found", the app is still running an older version. Run Stop_PetesVinyl.bat and start it again.</span></p>`;
+    }
     await renderLogs();
-    $("#testResult").innerHTML = `<div class="panel" style="margin-bottom:18px">${[["Discogs", r.discogs], ["OpenRouter", r.openrouter]].map(([n, x]) =>
-      `<p style="font-size:1.2rem"><b>${x.ok ? "✅" : "❌"} ${n}:</b> ${esc(x.message)}</p>`).join("")}</div>`;
+    $("#testResult").innerHTML = `<div class="panel" style="margin-bottom:18px">${html}</div>`;
   });
 }
 
