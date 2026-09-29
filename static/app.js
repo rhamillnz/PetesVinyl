@@ -149,6 +149,22 @@ $("#backupBtn").addEventListener("click", async () => {
   refreshBackup();
 });
 
+$("#quitBtn").addEventListener("click", async () => {
+  if (!(await confirmBox("Close Pete's Vinyl?", "Yes, close it", true))) return;
+  toast("Saving a backup and closing…");
+  let note = "";
+  try { note = (await api("/api/quit", { method: "POST" })).message || ""; } catch (_) { /* server is already going away */ }
+  document.body.innerHTML = `
+    <main style="min-height:100vh;display:grid;place-items:center;text-align:center">
+      <div class="panel" style="max-width:640px">
+        <div class="big-disc" style="margin:0 auto 20px"></div>
+        <h1>Pete's Vinyl has closed.</h1>
+        <p style="font-size:1.2rem">${note ? esc(note) + "<br>" : ""}You can now close this window.<br>
+        To open it again, double-click <b>Pete's Vinyl</b> on the desktop.</p>
+      </div></main>`;
+  setTimeout(() => window.close(), 800);
+});
+
 // ------------------------------------------------------------------ router
 const flags = { identify: new Set(), value: new Set() };
 let cleanup = null;
@@ -213,7 +229,7 @@ async function renderHome() {
         ${tabs.map(([key, label]) => `<button class="tab" data-state="${key}" aria-pressed="${home.state === key}">${label} (${counts[key]})</button>`).join("")}
       </div>
     </div>
-    ${shown.length ? `<div class="wall">${shown.map(cardHTML).join("")}</div>` : emptyHTML(all.length)}`;
+    ${shown.length ? jukeboxHTML(shown) : emptyHTML(all.length)}`;
 
   $$(".tab").forEach((t) => t.addEventListener("click", () => { home.state = t.dataset.state; store.set("pv.filter", home.state); renderHome(); }));
   let timer;
@@ -221,7 +237,47 @@ async function renderHome() {
     clearTimeout(timer);
     timer = setTimeout(async () => { home.q = e.target.value; await renderHome(); const s = $("#search"); s.focus(); s.setSelectionRange(s.value.length, s.value.length); }, 350);
   });
+  $$(".letter-bar button[data-letter]").forEach((b) => b.addEventListener("click", () => {
+    const target = document.getElementById(`letter-${b.dataset.letter}`);
+    if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+  }));
   refreshStats();
+}
+
+// Sort key: artist then album, ignoring case and a leading "The ". Unnamed records go last, under "?".
+function sortKey(r) {
+  const clean = (t) => (t || "").trim().toLowerCase().replace(/^(the|a|an)\s+/, "");
+  return `${clean(r.artist) || "\uffff"}\u0000${clean(r.album_title)}`;
+}
+function letterOf(r) {
+  const c = ((r.artist || "").trim().toLowerCase().replace(/^(the|a|an)\s+/, "")[0] || "").toUpperCase();
+  if (!c) return "?";
+  return /[A-Z]/.test(c) ? c : "#";
+}
+
+// A Wurlitzer-style selection window: records in A-Z order, each with a selection code like A1, A2, B1...
+function jukeboxHTML(records) {
+  const sorted = [...records].sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
+  const groups = new Map();
+  sorted.forEach((r) => {
+    const l = letterOf(r);
+    if (!groups.has(l)) groups.set(l, []);
+    groups.get(l).push(r);
+  });
+  const letters = [..."ABCDEFGHIJKLMNOPQRSTUVWXYZ#?"];
+  const bar = letters.map((l) => groups.has(l)
+    ? `<button type="button" data-letter="${l === "#" ? "num" : l === "?" ? "unknown" : l}" title="Jump to ${l}">${l}</button>`
+    : `<span class="off">${l}</span>`).join("");
+  const anchor = (l) => (l === "#" ? "num" : l === "?" ? "unknown" : l);
+  const sections = [...groups.entries()].map(([l, list]) => `
+    <section class="letter-group" id="letter-${anchor(l)}">
+      <h2 class="letter-heading"><span>${l === "?" ? "Not named yet" : l}</span></h2>
+      <div class="wall">${list.map((r, i) => cardHTML(r, `${l === "?" ? "•" : l}${i + 1}`)).join("")}</div>
+    </section>`).join("");
+  return `<div class="jukebox-window">
+    <div class="letter-bar" role="navigation" aria-label="Jump to a letter">${bar}</div>
+    ${sections}
+  </div>`;
 }
 
 function emptyHTML(total) {
@@ -231,7 +287,7 @@ function emptyHTML(total) {
 }
 function settingsName() { return store.get("pv.name", "Pete"); }
 
-function cardHTML(r) {
+function cardHTML(r, code = "") {
   const img = r.images.front ? `<img src="${esc(r.images.front)}" alt="" loading="lazy">` : "";
   const listedOn = (platformsCache || []).filter((p) => r[`${p.id}_status`] === "listed").map((p) => p.name);
   let badge = `<span class="badge ${r.state}">${STATE_LABEL[r.state]}</span>`;
@@ -241,6 +297,7 @@ function cardHTML(r) {
     <a class="card" href="#/record/${r.id}">
       <div class="card-img">${img}${r.state === "sold" ? `<div class="sold-stamp">SOLD ${money(r.sold_price)}</div>` : ""}</div>
       <div class="strip">
+        ${code ? `<span class="code">${esc(code)}</span>` : ""}
         <div class="artist">${esc(r.artist || "Unknown artist")}</div>
         <div class="album">${esc(r.album_title || "Untitled")}</div>
       </div>

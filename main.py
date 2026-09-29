@@ -11,6 +11,7 @@ import logging
 import os
 import subprocess
 import sys
+import threading
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -477,6 +478,24 @@ async def test_connections() -> dict[str, Any]:
             out["openrouter"] = {"ok": False, "message": f"Couldn't reach OpenRouter: {exc}"}
             activity.record("OpenRouter", "Key test", False, str(exc))
     return out
+
+
+@app.post("/api/quit")
+async def quit_app() -> dict[str, Any]:
+    """The big Stop button: back up, then shut the whole app down."""
+    message = ""
+    if backup.backup_folder() is not None:
+        result = await asyncio.to_thread(backup.run_backup)
+        message = result["message"]
+    await publishers.shutdown_browser()
+
+    def _exit() -> None:
+        db.close()
+        (config.LOGS_DIR / "server.pid").unlink(missing_ok=True)
+        os._exit(0)
+
+    threading.Timer(0.8, _exit).start()  # let this reply reach the browser first
+    return {"ok": True, "message": message}
 
 
 @app.get("/api/activity")

@@ -395,3 +395,43 @@ details.more summary { cursor: pointer; font-weight: 700; font-size: 1.05rem; pa
   box-shadow: var(--shadow);
 }
 .toast.error { border-color: var(--red); }
+
+/* ---------- Wurlitzer selection window ---------- */
+.jukebox-window {
+  border-radius: 28px 28px 18px 18px; padding: 16px 20px 26px;
+  background: radial-gradient(ellipse at 50% 0%, rgba(255, 190, 90, .16), transparent 65%), #170804;
+  border: 10px solid transparent;
+  border-image: linear-gradient(180deg, var(--chrome-1), var(--chrome-2) 45%, var(--chrome-3)) 1;
+  box-shadow: inset 0 0 40px rgba(0, 0, 0, .8), 0 0 30px rgba(255, 150, 50, .25), var(--shadow);
+}
+.letter-bar {
+  position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wrap; gap: 4px; justify-content: center;
+  padding: 10px 6px; margin: 0 -8px 10px; background: linear-gradient(180deg, #2a110a, #1c0a05);
+  border-radius: 14px; border-bottom: 3px solid var(--red);
+}
+.letter-bar button, .letter-bar .off {
+  min-width: 38px; height: 48px; display: grid; place-items: center; border-radius: 10px;
+  font: inherit; font-size: 1.2rem; font-weight: 900;
+}
+.letter-bar button {
+  cursor: pointer; border: 0; color: var(--ink);
+  background: linear-gradient(180deg, #fff, var(--chrome-2)); box-shadow: 0 3px 0 #555;
+}
+.letter-bar button:active { transform: translateY(2px); box-shadow: 0 1px 0 #555; }
+.letter-bar .off { color: #5a4030; border: 2px dashed #3a2418; }
+.letter-group { scroll-margin-top: 90px; margin-top: 18px; }
+.letter-heading {
+  display: flex; align-items: center; gap: 16px; margin: 0 0 14px; font-size: 1rem; color: var(--amber);
+}
+.letter-heading::before, .letter-heading::after { content: ""; flex: 1; height: 4px; border-radius: 4px; background: linear-gradient(90deg, transparent, var(--amber-deep), transparent); }
+.letter-heading span {
+  font-family: "Brush Script MT", "Segoe Script", "Lucida Handwriting", cursive; font-size: 3rem; line-height: 1;
+  color: #ffe7b0; text-shadow: 0 0 6px #ff9a2e, 0 0 16px #ff6a00;
+}
+.strip { position: relative; padding-left: 64px; text-align: left; }
+.strip .code {
+  position: absolute; left: 6px; top: 50%; transform: translateY(-50%);
+  min-width: 40px; padding: 4px 6px; border-radius: 8px; text-align: center;
+  background: var(--ink); color: var(--cream); font-weight: 900; font-size: 1.05rem; letter-spacing: .02em;
+}
+@media (prefers-reduced-motion: no-preference) { .card { transition: transform .12s, box-shadow .12s; } }
