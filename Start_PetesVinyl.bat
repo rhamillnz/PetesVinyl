@@ -1,23 +1,18 @@
 @echo off
 title Pete's Vinyl
-REM Double-click this to start Pete's Vinyl. It opens in the browser at http://localhost:8000
+REM Double-click this to start Pete's Vinyl. It opens in Chrome (or Edge) at http://localhost:8000
 cd /d "%~dp0"
 
-if not exist "venv\Scripts\activate.bat" (
-    echo Pete's Vinyl isn't installed yet. Running the installer first...
-    call "%~dp0Install_PetesVinyl.bat"
-)
-
-call venv\Scripts\activate.bat
-
-REM Start the server quietly in the background (no window to close by accident),
-REM then open the browser once it's ready. If it's already running, this just opens the browser.
-start "" venv\Scripts\pythonw.exe run.py
-
-REM Fallback in case pythonw isn't available: start uvicorn directly and open the browser after 3s.
+REM If the install is missing or broken (e.g. an install that didn't finish), repair it first.
+"venv\Scripts\python.exe" -c "import fastapi, uvicorn, pydantic, httpx" >nul 2>&1
 if errorlevel 1 (
-    start /B uvicorn main:app --port 8000
-    timeout /t 3 /nobreak >nul
-    start "" http://localhost:8000
+    echo Pete's Vinyl needs to finish installing. Running the installer first...
+    call "%~dp0Install_PetesVinyl.bat"
+    "venv\Scripts\python.exe" -c "import fastapi, uvicorn, pydantic, httpx" >nul 2>&1
+    if errorlevel 1 exit /b 1
 )
+
+REM Start the server quietly in the background (no window to close by accident) and open the app window.
+REM If it's already running, this just opens the window (or restarts it after an update).
+start "" "venv\Scripts\pythonw.exe" run.py
 exit

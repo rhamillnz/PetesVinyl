@@ -1,3 +1,5 @@
+# Works on Python 3.10 - 3.13 (3.12 recommended). Python 3.14+ is too new: some of these have no
+# ready-made Windows packages for it yet, so installing fails. See the README.
 fastapi>=0.110
 uvicorn[standard]>=0.29
 pydantic>=2.6
