@@ -181,6 +181,23 @@ $("#quitBtn").addEventListener("click", async () => {
   setTimeout(() => window.close(), 800);
 });
 
+// Links to other websites (TradeMe, eBay, Discogs, Popsike, Facebook...) open in Pete's NORMAL Chrome, where he's
+// already logged in, instead of a new window of the app's own private browser profile.
+document.addEventListener("click", async (e) => {
+  const a = e.target.closest("a[href]");
+  if (!a) return;
+  let url;
+  try { url = new URL(a.getAttribute("href"), location.href); } catch (_) { return; }
+  if (!/^https?:$/.test(url.protocol) || url.host === location.host) return;
+  e.preventDefault();
+  try {
+    const r = await api("/api/open-url", { method: "POST", body: { url: url.href } });
+    toast(`Opening it in ${r.browser}. Look for the new tab there.`);
+  } catch (_) {
+    window.open(url.href, "_blank", "noopener");     // fall back to the old way
+  }
+});
+
 // ------------------------------------------------------------------ router
 const flags = { identify: new Set(), value: new Set() };
 let cleanup = null;
@@ -1016,7 +1033,7 @@ function helperCardHTML(listing, result = null) {
         <div class="row">
           <a class="btn btn-chrome btn-small" href="${esc(listing.sell_url)}" target="_blank" rel="noopener">🌐 Open ${esc(listing.name)}</a>
           <button class="btn btn-chrome btn-small" data-folder>📁 Show the photos</button>
-          ${assist ? `<button class="btn btn-chrome btn-small" data-assist>🪄 Fill it in for me</button>` : ""}
+          ${assist ? `<button class="btn btn-chrome btn-small" data-assist title="Opens its own Chrome window and types the listing in. The first time, log in to the site there; it's remembered.">🪄 Fill it in for me</button>` : ""}
           <span class="spacer"></span>
           ${status === "listed" ? "" : `<button class="btn btn-green btn-small" data-listed>✅ I've listed it</button>`}
         </div>`}
@@ -1039,7 +1056,7 @@ function bindHelpers(id) {
     const assist = $("[data-assist]", card);
     if (assist) assist.addEventListener("click", async () => {
       assist.disabled = true;
-      toast(`Opening ${listing.name} in a new window…`);
+      toast(`Opening ${listing.name} in its own window. The first time, log in to ${listing.name} there; it's remembered after that.`);
       try {
         const res = await api(`/api/records/${id}/assist/${listing.platform}`, { method: "POST" });
         toast(res.message, !res.ok);
@@ -1231,7 +1248,10 @@ async function renderSettings(autoFind = false) {
           <button type="button" class="btn btn-green btn-small" id="psDone">✅ I've logged in</button>
           <button type="button" class="btn btn-chrome btn-small" id="psTest">🧪 Test Popsike</button>
         </div>
-        <p class="muted" style="margin-top:10px">Press <b>Log in</b>, then use "Log in with Google" on the Popsike window that opens (your Google password is only ever typed into Google's own page). When you're in, press <b>I've logged in</b>.</p>
+        <p class="muted" style="margin-top:10px">Press <b>Test Popsike</b> first: Popsike usually shows sold prices without logging in, so you may not need to log in at all.
+        Only if the test says a login is needed, press <b>Log in to Popsike</b>. The price lookups run on their own in the background, and Chrome doesn't let
+        any program take over your everyday Chrome (it blocks that to protect passwords), so this uses its own window: log in there once
+        (with "Log in with Google" you type your Google password into Google's own page), then press <b>I've logged in</b>. It's remembered after that, even after updates.</p>
         <div class="field" style="margin-top:14px"><label for="s_POPSIKE_SEARCH_URL">Popsike search address</label>
           <input type="text" id="s_POPSIKE_SEARCH_URL" name="POPSIKE_SEARCH_URL" value="${esc(settings.POPSIKE_SEARCH_URL)}">
           <span class="hint">Only change this if Test Popsike can't read prices. In the Popsike window that opens when you press <b>Log in</b> (it has an address bar), search for a record, copy the address from the bar, paste it here, and replace the artist and album words in it with <b>{query}</b>. Then press <b>Save settings</b> at the bottom of this page.</span></div>

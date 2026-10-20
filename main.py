@@ -606,6 +606,21 @@ def backup_log() -> dict[str, Any]:
     return {"entries": entries, "last_ok": next((e for e in entries if e["ok"]), None), "status": backup.status()}
 
 
+class OpenUrl(BaseModel):
+    url: str
+
+
+@app.post("/api/open-url")
+def open_url(body: OpenUrl) -> dict[str, Any]:
+    """Links to other websites open in Pete's normal Chrome, where he's already logged in."""
+    from urllib.parse import urlparse
+    parsed = urlparse(body.url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc or parsed.hostname in ("localhost", "127.0.0.1"):
+        raise HTTPException(400, "That isn't a web address I can open.")
+    name = browser.open_in_everyday_browser(body.url)
+    return {"ok": True, "browser": name}
+
+
 class LibraryChoice(BaseModel):
     path: str
 

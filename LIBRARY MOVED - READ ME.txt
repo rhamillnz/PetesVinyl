@@ -1,0 +1,3 @@
+Pete's Vinyl now keeps the records, photos and settings in:
+  /tmp/claude-0/-home-user-PetesVinyl/d82d175e-b141-56e8-bcac-300182a59232/scratchpad/link
+so updates and reinstalls can't lose them. The files here are an old copy and can stay.

@@ -61,3 +61,16 @@ def kill_profile_windows(profile_names: list[str]) -> None:
         subprocess.run(["powershell", "-NoProfile", "-Command", script], creationflags=0x08000000, timeout=20)
     except (OSError, subprocess.SubprocessError):
         pass
+
+
+def open_in_everyday_browser(url: str) -> str:
+    """Open a web page in Pete's NORMAL Chrome, as if he'd clicked a link there: his usual profile, so he's already
+    logged in to Google, TradeMe, Facebook and so on. (No private profile, unlike the app's own window.)
+    Returns the browser's name."""
+    import webbrowser
+    found = find_browser()
+    if found:
+        subprocess.Popen([found.path, url], creationflags=0x08000000 if os.name == "nt" else 0)
+        return found.name
+    webbrowser.open(url)     # whatever the default browser is
+    return "your web browser"

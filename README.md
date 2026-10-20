@@ -160,6 +160,7 @@ So updating, reinstalling, or downloading the app again into a different folder 
 | Clicking the shortcut does nothing, and `logs\server.log` says **No module named 'uvicorn'** | The install never finished. Run `Install_PetesVinyl.bat` again (`Start_PetesVinyl.bat` also tries to repair it by itself). |
 | A page says **"Not Found"**, or a red bar says the app **needs a restart** | The running copy is older than the files on disk (usually after an update). Double-click the desktop shortcut again. If it persists, run `Stop_PetesVinyl.bat`, then start the app. |
 | Photos are **blurry** or out of focus | On the photo step, watch the **Focus** bar under the picture: move the record slowly closer or further until it turns green and says *Sharp*. Open **🎛️ Focus and light controls** to use **Auto-focus**, **Focus now**, a **focus slider** and **brightness**, if your camera allows it (many USB webcams do, some don't, and the app says which). Your choices are remembered per camera. Good light on the cover helps most, and most webcams can't focus closer than about 10 to 15 cm. The app also warns after a photo that looked blurry. |
+| A website opens **without Pete's logins** | Links now open in his normal Chrome. If one still opens in a bare window, update the app. The automatic helpers (Popsike lookups, *Fill it in for me*) use their own window by design: log in there once and it's remembered, even after updates. |
 | The camera doesn't start | Click **Allow** when Chrome asks (the padlock in the window lets you change it). Choose the right camera in ⚙️ Settings → *Which camera to use*. Close other programs using the webcam (Zoom, Teams). In Windows *Settings → Privacy & security → Camera*, make sure camera access is on. |
 | The taskbar button shows the **Chrome logo** instead of the record | Unpin it, then pin the **desktop shortcut** (right-click → *Show more options* → *Pin to taskbar*), not the running window. |
 | The app won't stop, or port 8000 seems busy | Press ⏻ Stop in the app, or run `Stop_PetesVinyl.bat`. If it was ever started as Administrator, stop it once from an Administrator PowerShell, then always start it normally. |
@@ -262,7 +263,13 @@ PowerShell, then always start it normally.)
 [Popsike](https://www.popsike.com/) archives what records really sold for on eBay auctions, which is the best
 guide for rare records. It has no API, so the app reads it the way a person would:
 
-1. **Settings -> Popsike login -> Log in to Popsike.** A normal Chrome window opens on Popsike; use *Log in with
+**Links open in your normal Chrome.** Every link in the app to another website (Open TradeMe, eBay sold items, Discogs,
+Popsike, your listings) opens as a new tab in Pete's everyday Chrome, where he's already logged in. Only the two
+*automatic* helpers need their own window: Popsike price lookups and "Fill it in for me". Chrome doesn't let any program
+take over your everyday Chrome (it blocks that to protect passwords and logins), so those keep a separate, remembered login.
+
+0. Press **Test Popsike** first. Popsike usually shows sold prices without logging in, so the steps below may not be needed.
+1. **Only if the test says a login is needed: Settings -> Popsike login -> Log in to Popsike.** A normal Chrome window opens on Popsike; use *Log in with
    Google* there (your Google password is only ever typed into Google's own page, never into this app).
    Close the window and press **I've logged in**. The login is kept in the private `popsike_profile` folder.
 2. Press **Test Popsike**. It looks up a well-known record and tells you whether prices could be read.
