@@ -76,7 +76,9 @@ def finish_login() -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- reading the page
-async def fetch_page_text(url: str) -> str:
+async def fetch_page_text(url: str) -> dict[str, Any]:
+    """Load the page and return {text, title, url, status}. Also saves logs/popsike_last.png + popsike_last.txt
+    so it is easy to see exactly what Popsike showed the app."""
     from playwright.async_api import async_playwright
     kwargs: dict[str, Any] = {"headless": True, "viewport": {"width": 1280, "height": 900},
                               "args": ["--disable-blink-features=AutomationControlled"]}
@@ -90,9 +92,17 @@ async def fetch_page_text(url: str) -> str:
         ctx = await pw.chromium.launch_persistent_context(str(PROFILE_DIR), **kwargs)
         try:
             page = await ctx.new_page()
-            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+            resp = await page.goto(url, wait_until="domcontentloaded", timeout=45000)
             await page.wait_for_timeout(2500)
-            return await page.inner_text("body")
+            text = await page.inner_text("body")
+            info = {"text": text, "title": await page.title(), "url": page.url, "status": resp.status if resp else None}
+            try:
+                config.LOGS_DIR.mkdir(exist_ok=True)
+                await page.screenshot(path=str(config.LOGS_DIR / "popsike_last.png"))
+                (config.LOGS_DIR / "popsike_last.txt").write_text(f"{info['url']}\n{info['title']}\n\n{text}", encoding="utf-8")
+            except Exception:  # noqa: BLE001 - diagnostics are a bonus
+                pass
+            return info
         finally:
             await ctx.close()
 
@@ -140,11 +150,15 @@ async def lookup(rec: dict[str, Any]) -> dict[str, Any]:
         return result
     async with _lock:
         try:
-            text = await fetch_page_text(url)
+            page_info = await fetch_page_text(url)
+            text = page_info["text"]
         except Exception as exc:  # noqa: BLE001 - a browser problem must never break a price check
             activity.record("Popsike", f"Loading results for {query}", False, f"Couldn't open the page: {exc}")
             result["note"] = "Couldn't open Popsike."
             return result
+    snippet = " | ".join(line.strip() for line in text.splitlines() if line.strip())[:400]
+    seen = (f"Page: \"{page_info['title']}\" at {page_info['url']} (HTTP {page_info['status']}), "
+            f"{len(text)} characters of text. Starts: {snippet or '(empty page)'}")
     low = text.lower()
     if any(w in low[:3000] for w in BLOCK_WORDS):
         activity.record("Popsike", f"Loading results for {query}", False,
@@ -179,5 +193,7 @@ async def lookup(rec: dict[str, Any]) -> dict[str, Any]:
         result["count"] = len(prices)
     activity.record("Popsike", f"Sold auctions for {query}", bool(prices),
                     f"{len(prices)} sale prices found" + (f", middle price {home} {result['median']:.0f}" if prices else "")
-                    + (f". {result['note']}" if result["note"] else ""))
+                    + (f". {result['note']}" if result["note"] else "")
+                    + ("" if prices else f"\n{seen}\n(A screenshot and the page text are saved in the logs folder: "
+                                          "popsike_last.png and popsike_last.txt)"))
     return result
