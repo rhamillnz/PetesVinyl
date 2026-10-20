@@ -358,6 +358,12 @@ async function renderPhotos(id) {
           <div class="flash" id="flash"></div>
           <div class="camera-msg" id="camMsg">Starting the camera…</div>
         </div>
+        <div class="sharp-row" id="sharpRow" aria-live="polite">
+          <span class="sharp-title">Focus</span>
+          <div class="sharp-bar"><i id="sharpFill"></i></div>
+          <b id="sharpLabel">…</b>
+        </div>
+        <details class="cam-controls" id="camControls"><summary>🎛️ Focus and light controls</summary><div id="camControlsBody"></div></details>
         <div class="thumbs" id="thumbs"></div>
         <div class="extras-bar">
           <span class="label">More to photograph?</span>
@@ -446,6 +452,100 @@ async function renderPhotos(id) {
     paint();
   }
 
+  // ---- focus and light controls (only what this camera's driver offers) + a live sharpness meter
+  let sharpTimer = null;
+  let sharpPeak = 30;
+  let lastSharp = "none";        // none | blurry | nearly | sharp
+  const sharpCanvas = document.createElement("canvas");
+  sharpCanvas.width = 320; sharpCanvas.height = 180;
+  const sharpCtx = sharpCanvas.getContext("2d", { willReadFrequently: true });
+
+  function startSharpness() {
+    clearInterval(sharpTimer);
+    sharpTimer = setInterval(() => {
+      const v = $("#video");
+      if (!v || !v.videoWidth) return;
+      // measure the middle of the picture, where the record is held
+      const sw = v.videoWidth * 0.6, sh = v.videoHeight * 0.6;
+      sharpCtx.drawImage(v, (v.videoWidth - sw) / 2, (v.videoHeight - sh) / 2, sw, sh, 0, 0, 320, 180);
+      const value = laplacianVariance(sharpCtx.getImageData(0, 0, 320, 180));
+      sharpPeak = Math.max(sharpPeak * 0.99, value, 30);     // best recent value; slowly forgets so it adapts to the scene
+      const ratio = Math.min(1, value / sharpPeak);
+      const fill = $("#sharpFill"), label = $("#sharpLabel"), row = $("#sharpRow");
+      if (!fill) return;
+      let state = "blurry", text = "Blurry";
+      if (value < 8) { state = "none"; text = "Hold something up"; }
+      else if (ratio >= 0.8) { state = "sharp"; text = "Sharp ✓"; }
+      else if (ratio >= 0.5) { state = "nearly"; text = "Nearly"; }
+      fill.style.width = `${state === "none" ? 0 : Math.round(ratio * 100)}%`;
+      label.textContent = text;
+      row.dataset.state = state;
+      lastSharp = state;
+    }, 400);
+  }
+
+  async function setupCameraControls() {
+    const track = stream && stream.getVideoTracks()[0];
+    const body = $("#camControlsBody");
+    if (!track || !body) return;
+    const caps = track.getCapabilities ? track.getCapabilities() : {};
+    const settings = track.getSettings ? track.getSettings() : {};
+    const key = `pv.camctl.${settings.deviceId || "default"}`;
+    const modes = Array.isArray(caps.focusMode) ? caps.focusMode : [];
+    const dist = caps.focusDistance && caps.focusDistance.max > caps.focusDistance.min ? caps.focusDistance : null;
+    const bright = caps.brightness && caps.brightness.max > caps.brightness.min ? caps.brightness : null;
+    let saved = {};
+    try { saved = JSON.parse(store.get(key, "{}")) || {}; } catch (_) { saved = {}; }
+    const apply = async (advanced) => {
+      try { await track.applyConstraints({ advanced: [advanced] }); return true; } catch (e) { return false; }
+    };
+    const remember = (patch) => { saved = { ...saved, ...patch }; store.set(key, JSON.stringify(saved)); };
+
+    const html = [];
+    if (modes.includes("continuous")) html.push(`<button type="button" class="btn btn-small" id="ccAuto">🔄 Auto-focus (let the camera decide)</button>`);
+    if (modes.includes("single-shot") || modes.includes("continuous")) html.push(`<button type="button" class="btn btn-small btn-chrome" id="ccNow">🎯 Focus now</button>`);
+    if (dist && modes.includes("manual")) html.push(`<div class="field"><label for="ccDist">Focus by hand: closer ⟷ further away</label>
+      <input type="range" id="ccDist" min="${dist.min}" max="${dist.max}" step="${dist.step || 1}" value="${saved.focusDistance ?? settings.focusDistance ?? dist.min}">
+      <span class="hint">Hold the record still and slide until the <b>Focus</b> bar turns green.</span></div>`);
+    if (bright) html.push(`<div class="field"><label for="ccBright">Brightness</label>
+      <input type="range" id="ccBright" min="${bright.min}" max="${bright.max}" step="${bright.step || 1}" value="${saved.brightness ?? settings.brightness ?? bright.min}"></div>`);
+    if (!html.length) {
+      body.innerHTML = `<p class="muted">This camera doesn't let the app change its focus. That's the camera's driver, not the app.
+        The <b>Focus</b> bar still works, so move the record slowly closer and further until it turns green. Tips: good light on the cover helps a lot,
+        most webcams can't focus closer than about 10 to 15 cm, and the camera maker's own program (Logitech, Razer, and so on) often has focus controls.</p>`;
+    } else {
+      body.innerHTML = `<div class="row">${html.filter((h) => h.startsWith("<button")).join("")}</div>${html.filter((h) => !h.startsWith("<button")).join("")}`;
+    }
+    const auto = $("#ccAuto"), now = $("#ccNow"), range = $("#ccDist"), br = $("#ccBright");
+    if (auto) auto.addEventListener("click", async () => { await apply({ focusMode: "continuous" }); remember({ focusMode: "continuous", focusDistance: undefined }); sharpPeak = 30; toast("Auto-focus is on."); });
+    if (now) now.addEventListener("click", async () => {
+      sharpPeak = 30;
+      if (modes.includes("single-shot")) { await apply({ focusMode: "single-shot" }); }
+      else { await apply({ focusMode: "manual" }); await new Promise((r) => setTimeout(r, 150)); await apply({ focusMode: "continuous" }); }
+      toast("Focusing…");
+    });
+    if (range) {
+      let t;
+      range.addEventListener("input", () => {
+        clearTimeout(t);
+        t = setTimeout(async () => {
+          const v = Number(range.value);
+          await apply({ focusMode: "manual", focusDistance: v });
+          remember({ focusMode: "manual", focusDistance: v });
+          sharpPeak = 30;
+        }, 80);
+      });
+    }
+    if (br) {
+      let t;
+      br.addEventListener("input", () => { clearTimeout(t); t = setTimeout(async () => { const v = Number(br.value); await apply({ brightness: v }); remember({ brightness: v }); }, 80); });
+    }
+    // put back what was chosen last time with this camera
+    if (saved.focusMode === "manual" && saved.focusDistance !== undefined && dist) await apply({ focusMode: "manual", focusDistance: saved.focusDistance });
+    if (saved.brightness !== undefined && bright) await apply({ brightness: saved.brightness });
+    if (html.length) $("#camControls").open = !!saved.focusMode;   // open by default only once Pete has used it
+  }
+
   async function startCamera() {
     const deviceId = store.get("pv.camera");
     const video = { width: { ideal: 1920 }, height: { ideal: 1080 } };
@@ -463,6 +563,8 @@ async function renderPhotos(id) {
     if (!v) { stream.getTracks().forEach((t) => t.stop()); return; }
     v.srcObject = stream;
     $("#camMsg").classList.add("hidden");
+    setupCameraControls();
+    startSharpness();
   }
 
   function snap() {
@@ -473,7 +575,9 @@ async function renderPhotos(id) {
     canvas.getContext("2d").drawImage(v, 0, 0);
     const f = $("#flash"); f.classList.remove("go"); void f.offsetWidth; f.classList.add("go");
     shutterSound();
+    const wasBlurry = lastSharp === "blurry";
     addShot(canvas.toDataURL("image/jpeg", 0.9));
+    if (wasBlurry) toast("That photo may be a bit blurry. Tap its picture below to retake it.", true);
   }
 
   $("#snap").addEventListener("click", snap);
@@ -511,10 +615,28 @@ async function renderPhotos(id) {
 
   cleanup = () => {
     document.removeEventListener("keydown", onKey);
+    clearInterval(sharpTimer);
     if (stream) stream.getTracks().forEach((t) => t.stop());
   };
   paint();
   startCamera();
+}
+
+// How sharp is a picture? The variance of the Laplacian: crisp edges give a big number, a blurry picture a small one.
+function laplacianVariance(img) {
+  const { data, width: w, height: h } = img;
+  const gray = new Float32Array(w * h);
+  for (let i = 0, j = 0; i < data.length; i += 4, j++) gray[j] = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+  let sum = 0, sumSq = 0, n = 0;
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x;
+      const lap = 4 * gray[i] - gray[i - 1] - gray[i + 1] - gray[i - w] - gray[i + w];
+      sum += lap; sumSq += lap * lap; n++;
+    }
+  }
+  const mean = sum / n;
+  return sumSq / n - mean * mean;
 }
 
 function shutterSound() {

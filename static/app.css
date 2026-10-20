@@ -532,3 +532,16 @@ body {
 .check-links .label { font-weight: 700; color: var(--text-dim); width: 100%; }
 /* the current step must stay readable on the pale wood */
 .step.current { background: rgba(70, 34, 12, .96); color: #fff; }
+
+/* ---------- webcam focus meter and controls ---------- */
+.sharp-row { display: flex; align-items: center; gap: 14px; margin: 12px 0 8px; font-size: 1.1rem; }
+.sharp-title { font-weight: 800; color: var(--ink); min-width: 60px; }
+.sharp-bar { flex: 1; height: 22px; border-radius: 999px; background: rgba(0, 0, 0, .55); border: 3px solid #6b3a22; overflow: hidden; }
+.sharp-bar i { display: block; height: 100%; width: 0; border-radius: 999px; background: var(--red); transition: width .25s, background .25s; }
+.sharp-row[data-state="nearly"] .sharp-bar i { background: var(--amber); }
+.sharp-row[data-state="sharp"] .sharp-bar i { background: var(--green); }
+.sharp-row b { min-width: 150px; color: var(--ink); text-align: right; }
+.cam-controls { margin-bottom: 8px; }
+.cam-controls summary { cursor: pointer; font-weight: 800; color: var(--ink); padding: 8px 0; font-size: 1.05rem; }
+.cam-controls > div { background: linear-gradient(180deg, var(--panel-2), var(--panel)); color: var(--text); border-radius: 16px; padding: 16px 18px; border: 3px solid #6b3a22; }
+.cam-controls input[type="range"] { width: 100%; height: 36px; accent-color: var(--amber); }
