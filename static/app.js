@@ -1068,7 +1068,7 @@ const SETTINGS_SECTIONS = [
     ["SELLER_NAME", "Your first name"], ["SELLER_LOCATION", "Where you post from (e.g. Tauranga, New Zealand)"],
     ["HOME_CURRENCY", "Your currency (NZD)"], ["SHIPPING_NOTE", "Postage note added to listings"]]],
   ["AI helper (OpenRouter)", "Reads the photos and researches prices on the internet. Create a key at openrouter.ai/keys and add a few dollars of credit.", [
-    ["OPENROUTER_API_KEY", "OpenRouter API key"], ["OPENROUTER_MODEL", "AI model (must support images)"], ["AI_WEB_SEARCH", "Search the web (true/false)"]]],
+    ["OPENROUTER_API_KEY", "OpenRouter API key"], ["OPENROUTER_MODEL", "AI model (must support images)"], ["OPENROUTER_FALLBACK_MODEL", "Backup AI model (used if the main one is busy or fails)"], ["AI_WEB_SEARCH", "Search the web (true/false)"]]],
   ["Discogs", "Free token from discogs.com/settings/developers. Finds exact pressings, prices, and posts Discogs listings.", [
     ["DISCOGS_API_TOKEN", "Discogs personal token"], ["DISCOGS_LISTING_STATUS", "New listings start as (Draft or For Sale)"]]],
   ["TradeMe (optional)", "Needs an approved TradeMe API application. Without it, TradeMe uses the copy & paste helper.", [

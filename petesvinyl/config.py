@@ -21,6 +21,7 @@ DEFAULTS: dict[str, str] = {
     # AI (OpenRouter)
     "OPENROUTER_API_KEY": "",
     "OPENROUTER_MODEL": "google/gemini-2.5-flash",
+    "OPENROUTER_FALLBACK_MODEL": "google/gemini-2.5-flash",   # used if the main model is busy or fails
     "AI_WEB_SEARCH": "true",
     # Discogs
     "DISCOGS_API_TOKEN": "",

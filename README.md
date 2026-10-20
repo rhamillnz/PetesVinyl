@@ -117,6 +117,7 @@ Tips:
 - Discogs listings are created as **Draft** by default so they can be checked before going live. Change `DISCOGS_LISTING_STATUS` to `For Sale` once you trust it.
 - TradeMe and eBay default to their **sandbox** (test) sites. Set `TRADEME_SANDBOX` / `EBAY_SANDBOX` to `false` when ready.
 - You can change the AI model in Settings. It must be one that accepts images (see <https://openrouter.ai/models>).
+- **Free models and a backup:** you can set **AI model** to a free one (names end in `:free`) to save money, but free models are rate-limited and sometimes "busy upstream". Set **Backup AI model** (default `google/gemini-2.5-flash`) and the app quietly uses it for that one request whenever the main model is busy, removed or gives an unusable answer. The log page shows each switch and what the paid call cost. Free models allow 50 requests a day until the OpenRouter account has bought $10 of credit in total, then 1,000 a day.
 
 ### 6. Backups to Google Drive
 1. Install **Google Drive for Desktop**: <https://www.google.com/drive/download/>, and sign in with the Google account.

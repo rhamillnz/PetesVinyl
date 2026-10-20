@@ -45,15 +45,22 @@ def extract_json(text: str) -> dict[str, Any]:
     return json.loads(text[start : end + 1])
 
 
-async def chat_json(content: list[dict[str, Any]], web_search: bool = False, max_tokens: int = 1500) -> dict[str, Any]:
-    # Gemini 2.5 is a "thinking" model: its hidden reasoning shares this limit, so leave plenty of room
-    # or it can use everything up and return an empty answer.
-    max_tokens = max(max_tokens, 4000)
-    key = config.get("OPENROUTER_API_KEY")
-    if not key:
-        raise AIUnavailable("No OpenRouter API key set. Add one in Settings.")
+def _short_error(resp: httpx.Response) -> str:
+    """A readable one-liner from OpenRouter's (often very long) error JSON."""
+    try:
+        err = resp.json().get("error", {})
+        raw = (err.get("metadata") or {}).get("raw")
+        msg = raw if isinstance(raw, str) and raw else err.get("message", "")
+        return str(msg)[:200] or resp.text[:200]
+    except (ValueError, AttributeError):
+        return resp.text[:200]
+
+
+async def _try_model(model: str, content: list[dict[str, Any]], web_search: bool, max_tokens: int,
+                     headers: dict[str, str]) -> tuple[dict[str, Any] | None, str]:
+    """Ask one model. Returns (answer, "") on success or (None, why it didn't work)."""
     body: dict[str, Any] = {
-        "model": config.get("OPENROUTER_MODEL"),
+        "model": model,
         "messages": [{"role": "user", "content": content}],
         "max_tokens": max_tokens,
         "temperature": 0.1,
@@ -62,14 +69,9 @@ async def chat_json(content: list[dict[str, Any]], web_search: bool = False, max
     }
     if web_search and config.get_bool("AI_WEB_SEARCH"):
         body["plugins"] = [{"id": "web", "max_results": 5}]
-    headers = {
-        "Authorization": f"Bearer {key}",
-        "HTTP-Referer": "http://localhost:8000",
-        "X-Title": "PetesVinyl",
-    }
     kind = "with web search" if "plugins" in body else "no web search"
     has_photos = any(p.get("type") == "image_url" for p in content)
-    what = f"Asking {body['model']} ({kind}{', with photos' if has_photos else ''})"
+    what = f"Asking {model} ({kind}{', with photos' if has_photos else ''})"
     problem = ""
     for attempt in (1, 2):
         label = what if attempt == 1 else f"{what} - trying again"
@@ -78,18 +80,20 @@ async def chat_json(content: list[dict[str, Any]], web_search: bool = False, max
                 resp = await client.post(OPENROUTER_URL, json=body, headers=headers)
         except httpx.HTTPError as exc:
             activity.record("OpenRouter", label, False, f"Couldn't connect: {exc}")
-            raise AIUnavailable(f"Couldn't reach OpenRouter: {exc}") from exc
+            return None, f"couldn't reach OpenRouter ({exc})"
         if resp.status_code >= 400:
-            activity.record("OpenRouter", label, False, f"{resp.status_code}: {resp.text[:400]}")
-        if resp.status_code == 402:
-            raise AIUnavailable("The OpenRouter account has run out of credit. Top it up at openrouter.ai.")
-        if resp.status_code >= 400:
-            raise AIUnavailable(f"OpenRouter error {resp.status_code}: {resp.text[:300]}")
+            why = _short_error(resp)
+            activity.record("OpenRouter", label, False, f"{resp.status_code}: {why}")
+            if resp.status_code == 402:
+                return None, "the OpenRouter account has run out of credit (top it up at openrouter.ai)"
+            if resp.status_code == 429:
+                return None, f"{model} is busy right now (rate-limited)"
+            return None, f"OpenRouter error {resp.status_code}: {why}"
         data = resp.json()
         try:
             choice = data["choices"][0]
             text = choice["message"].get("content") or ""
-        except (KeyError, IndexError, AttributeError) as exc:
+        except (KeyError, IndexError, AttributeError, TypeError):
             activity.record("OpenRouter", label, False, f"Unexpected reply: {str(data)[:400]}")
             problem = "OpenRouter sent back something unexpected"
             continue
@@ -99,7 +103,7 @@ async def chat_json(content: list[dict[str, Any]], web_search: bool = False, max
         try:
             result = extract_json(text)
         except ValueError:
-            why = "The AI's reply was empty" if not text.strip() else "The AI's reply had no usable answer in it"
+            why = "the AI's reply was empty" if not text.strip() else "the AI's reply had no usable answer in it"
             if finish == "length":
                 why += " (it ran out of room)"
             activity.record("OpenRouter", label, False,
@@ -107,9 +111,37 @@ async def chat_json(content: list[dict[str, Any]], web_search: bool = False, max
             problem = why
             continue
         activity.record("OpenRouter", label, True, f"{cost_txt}Reply: {text.strip()[:1200]}")
-        return result
-    raise AIUnavailable(f"{problem}, even after trying twice. Please press 'Read the photos again', "
-                        "or type the details in.")
+        return result, ""
+    return None, f"{problem} twice"
+
+
+async def chat_json(content: list[dict[str, Any]], web_search: bool = False, max_tokens: int = 1500) -> dict[str, Any]:
+    """Ask the main model; if it is busy, rate-limited, removed or gives unusable answers, quietly use the backup
+    model for this one request (OPENROUTER_FALLBACK_MODEL)."""
+    # Gemini 2.5 is a "thinking" model: its hidden reasoning shares this limit, so leave plenty of room
+    # or it can use everything up and return an empty answer.
+    max_tokens = max(max_tokens, 4000)
+    key = config.get("OPENROUTER_API_KEY")
+    if not key:
+        raise AIUnavailable("No OpenRouter API key set. Add one in Settings.")
+    headers = {"Authorization": f"Bearer {key}", "HTTP-Referer": "http://localhost:8000", "X-Title": "PetesVinyl"}
+    models = [config.get("OPENROUTER_MODEL")]
+    backup = config.get("OPENROUTER_FALLBACK_MODEL")
+    if backup and backup != models[0]:
+        models.append(backup)
+    problems: list[str] = []
+    for i, model in enumerate(models):
+        result, problem = await _try_model(model, content, web_search, max_tokens, headers)
+        if result is not None:
+            return result
+        problems.append(problem)
+        if i + 1 < len(models):
+            activity.record("OpenRouter", f"Switching to the backup model {models[i + 1]}", True,
+                            f"The main model didn't work: {problem}")
+    if len(models) > 1:
+        raise AIUnavailable(f"Neither AI model worked ({'; '.join(problems)}). Please try again in a minute, "
+                            "or type the details in.")
+    raise AIUnavailable(f"The AI didn't work this time: {problems[0]}. Please try again, or type the details in.")
 
 
 IDENTIFY_PROMPT = """You are an expert vinyl record appraiser helping an elderly collector in {location} catalogue his records.
