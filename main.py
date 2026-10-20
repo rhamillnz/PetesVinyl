@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -612,9 +612,36 @@ def stats() -> dict[str, Any]:
 # --------------------------------------------------------------------------- static files
 IMAGES_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/images", StaticFiles(directory=IMAGES_DIR), name="images")
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+class NoCacheStatic(StaticFiles):
+    """The page's own files (script, styles, icon) must always be re-checked, so an update shows up straight away
+    instead of the browser quietly reusing an old copy."""
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+app.mount("/static", NoCacheStatic(directory=STATIC_DIR), name="static")
+
+
+def _static_version() -> str:
+    """Changes whenever the script or styles change, so the page links to a fresh copy after every update."""
+    import hashlib
+    h = hashlib.sha1()
+    for name in ("app.js", "app.css"):
+        try:
+            h.update((STATIC_DIR / name).read_bytes())
+        except OSError:
+            pass
+    return h.hexdigest()[:10]
 
 
 @app.get("/")
-def index() -> FileResponse:
-    return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"})
+def index() -> HTMLResponse:
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    v = _static_version()
+    html = html.replace('/static/app.js"', f'/static/app.js?v={v}"').replace('/static/app.css"', f'/static/app.css?v={v}"')
+    return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
