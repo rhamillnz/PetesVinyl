@@ -77,10 +77,14 @@ if not exist "venv\Scripts\python.exe" (
     if errorlevel 1 echo   Couldn't check the extra parts. If the app doesn't start, run Install_PetesVinyl.bat.
 )
 
-REM --- 4. Make sure both desktop shortcuts exist (older installs didn't have the Update one).
+REM --- 4. Safety copy of the library (and, on the first update that knows about it, move the library to its
+REM        permanent home outside this folder). Updates never touch the library, this is belt and braces.
+if exist "venv\Scripts\python.exe" "venv\Scripts\python.exe" "tools\safety_copy.py" "after update"
+
+REM --- 5. Make sure both desktop shortcuts exist (older installs didn't have the Update one).
 powershell -NoProfile -ExecutionPolicy Bypass -File "tools\make_shortcuts.ps1" -AppDir "%APPDIR%"
 
-REM --- 5. Start the app again.
+REM --- 6. Start the app again.
 echo.
 echo Starting Pete's Vinyl again...
 start "" "venv\Scripts\pythonw.exe" run.py

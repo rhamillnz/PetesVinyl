@@ -83,9 +83,14 @@ def connect() -> sqlite3.Connection:
     with _lock:
         if _conn is None:
             DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+            from . import library
+            library.migrate_legacy()   # move a library from the old place (inside the app folder) on first start
             _conn = sqlite3.connect(DB_PATH, check_same_thread=False)
             _conn.row_factory = sqlite3.Row
-            _conn.execute("PRAGMA journal_mode=WAL")
+            # One self-contained file (no separate -wal file that could be left behind when copying), written
+            # safely to disk on every change, so a sudden power-off or forced stop can't lose saved records.
+            _conn.execute("PRAGMA journal_mode=DELETE")
+            _conn.execute("PRAGMA synchronous=FULL")
             init(_conn)
         return _conn
 

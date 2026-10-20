@@ -131,8 +131,17 @@ What gets backed up: the database, a dated copy each day (last 30 kept, in `hist
 Backups happen automatically (within 15 minutes of any change, and at least every 6 hours), when Pete presses **Back Up**, and when he presses **Stop**.
 Every backup is checked after it's made and recorded in **⚙️ Settings → 📜 What has the app been doing? → Backups**, with when it ran and whether it worked.
 
-**Restoring on a new PC:** install the app as above, then copy `vinyl_collection.db` and the `images` folder from
-`My Drive\PetesVinyl Backup` into the app folder.
+**Restoring on a new PC:** install the app as above (and Google Drive for Desktop), then go to **⚙️ Settings → 📚 Your
+library → Find an old library on this computer**. It finds the Google Drive backup; press **Load this library**.
+
+### Where the records are kept (and why updates can't lose them)
+The records, photos, settings and API keys live in **one fixed folder per Windows user**:
+**`%LOCALAPPDATA%\PetesVinyl`** (for example `C:\Users\Pete\AppData\Local\PetesVinyl`), *not* in the app folder.
+So updating, reinstalling, or downloading the app again into a different folder always finds the same library.
+
+- Older versions kept the library inside the app folder. The first time the new version starts, it **moves it automatically** (the old files are left where they are, with a note).
+- **Safety copies** are made automatically once a day, after every update, and before loading another library, in `%LOCALAPPDATA%\PetesVinyl\safety copies` (the last 30 are kept).
+- **Lost track of a library?** ⚙️ Settings → 📚 *Your library* → **Find an old library on this computer** searches old app folders, the Google Drive backup and the safety copies, shows how many records each has, and loads the one you pick (your current library is safety-copied first, so it can always be undone). An empty home screen also shows a **"Had records before? Find your old library"** button.
 
 ---
 
@@ -156,10 +165,11 @@ Every backup is checked after it's made and recorded in **⚙️ Settings → �
 | The app won't stop, or port 8000 seems busy | Press ⏻ Stop in the app, or run `Stop_PetesVinyl.bat`. If it was ever started as Administrator, stop it once from an Administrator PowerShell, then always start it normally. |
 | Popsike log says **"0 sale prices found"** | The page loaded but no prices could be read. The log line now shows what Popsike returned, and `logs\popsike_last.png` / `popsike_last.txt` hold a screenshot and the page text. Most often the **Popsike search address** (Settings) is wrong: search for a record on Popsike yourself, copy the address from the browser, put `{query}` where the artist and album words were, and paste it into **Settings → Popsike login → Popsike search address**. If the page asks you to log in, use *Log in to Popsike* again. |
 | The **Update** icon says Git isn't installed, or couldn't reach GitHub | Install **Git for Windows** from <https://git-scm.com/download/win> (default options), check the internet connection, and try again. If a GitHub sign-in window opens, sign in there. |
+| **Records or API keys missing** after an update or reinstall | Nothing is deleted: the app was probably started from a different folder. Go to ⚙️ Settings → 📚 *Your library* → **Find an old library on this computer**, and load the one with your records. (From this version on, the library is kept outside the app folder, so this can't happen again.) |
 | Discogs says **"You must fill out your seller settings first"** | Complete <https://www.discogs.com/settings/seller>. Until then the app uses the cheapest copy for sale instead of Discogs' suggested price. |
 
-**Starting over without losing records:** delete only the `venv` folder and run `Install_PetesVinyl.bat`. Your records live
-in `vinyl_collection.db` and the `images` folder, and your keys in `.env` and the database. Keep those.
+**Starting over without losing records:** delete the `venv` folder (or even the whole app folder) and install again. The
+records, photos and keys live in `%LOCALAPPDATA%\PetesVinyl`, which the installer and updates never touch.
 
 **A brand-new Windows install** needs nothing special beyond the steps above. (Run Windows Update first, and install your
 graphics driver from the manufacturer if the screen looks wrong. That has nothing to do with this app.)
@@ -202,12 +212,13 @@ petesvinyl/
   listings.py           per-site titles, descriptions, prices, currency; site recommendations
   publishers.py         TradeMe (OAuth1), eBay Inventory API, Discogs, Playwright browser helper
   backup.py             Google Drive for Desktop backup
+  library.py            where the library lives, safety copies, finding and loading old libraries
   currency.py           exchange rates (open.er-api.com, offline fallback)
 static/                 index.html + app.css + app.js + vinyl.ico (no frameworks, no build step)
 tools/make_icon.py      draws static/vinyl.ico and update.ico (pure Python)
 tools/make_shortcuts.ps1  creates the two desktop shortcuts
 Update_PetesVinyl.bat   the desktop "Update" icon: git pull + install new parts + restart
-images/record_<id>/     the photos (front, back, disc_a, disc_b)
+%LOCALAPPDATA%\PetesVinyl\   the library: vinyl_collection.db, images\record_<id>\, safety copies\, Popsike login
 ```
 
 Key endpoints: `POST /api/records` (base64 photos), `POST /api/records/{id}/identify`,

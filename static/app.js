@@ -194,7 +194,7 @@ async function route() {
   if (Date.now() - lastVersionCheck > 20000) { lastVersionCheck = Date.now(); checkVersion(); }
   try {
     if (parts[0] === "add") return await renderPhotos(null);
-    if (parts[0] === "settings") return await renderSettings();
+    if (parts[0] === "settings") return await renderSettings(parts[1] === "find");
     if (parts[0] === "logs") return await renderLogs();
     if (parts[0] === "record" && parts[1]) {
       const id = Number(parts[1]);
@@ -304,7 +304,8 @@ function jukeboxHTML(records) {
 function emptyHTML(total) {
   if (total) return `<div class="panel empty"><h2>No records here</h2><p>Try another button above, or clear the search box.</p></div>`;
   return `<div class="panel empty"><div class="big-disc"></div><h2>Welcome, ${esc(settingsName())}!</h2>
-    <p style="font-size:1.2rem">You haven't added any records yet.<br>Press the big gold <b>Add a Record</b> button to start.</p></div>`;
+    <p style="font-size:1.2rem">You haven't added any records yet.<br>Press the big gold <b>Add a Record</b> button to start.</p>
+    <p style="margin-top:22px"><a class="btn btn-chrome" href="#/settings/find">📚 Had records before? Find your old library</a></p></div>`;
 }
 function settingsName() { return store.get("pv.name", "Pete"); }
 
@@ -1209,7 +1210,7 @@ const SETTINGS_SECTIONS = [
     ["BACKUP_FOLDER", "Backup folder"], ["BACKUP_EVERY_HOURS", "Back up at least every … hours"]]],
 ];
 
-async function renderSettings() {
+async function renderSettings(autoFind = false) {
   const [{ settings, secret_keys: secrets }, backupInfo] = await Promise.all([api("/api/settings"), api("/api/backup")]);
   app.innerHTML = `
     <div class="row" style="margin-bottom:18px"><a class="btn btn-chrome btn-small" href="#/">⬅ Back to my records</a></div>
@@ -1217,6 +1218,10 @@ async function renderSettings() {
       <p class="muted" id="versionLine" style="float:right;margin:0"></p>
       <h1>⚙️ Settings</h1>
       <p class="muted">This page is for setting things up. Once it's done you won't need to come back here.</p>
+      <div class="settings-section" id="librarySection"><h2>📚 Your library</h2>
+        <p id="libState">Checking…</p>
+        <button type="button" class="btn btn-small" id="libFind">🔍 Find an old library on this computer</button>
+        <div id="libResults"></div></div>
       <div class="settings-section"><h2>Camera</h2>
         <div class="field"><label for="camSel">Which camera to use</label><select id="camSel"><option value="">Default camera</option></select></div></div>
       <div class="settings-section"><h2>Popsike login</h2>
@@ -1261,6 +1266,44 @@ async function renderSettings() {
         : s.connected ? "✅ Logged in to Popsike (press Test Popsike to check it still works)." : "Not logged in yet.";
     } catch (_) { $("#popsikeState").textContent = ""; }
   };
+  // ---- library: where it lives, and finding / loading another one
+  const libState = async () => {
+    try {
+      const l = await api("/api/library");
+      $("#libState").innerHTML = `Your records, photos and settings are kept in <b>${esc(l.folder)}</b> (${l.records} record${l.records === 1 ? "" : "s"}).
+        This folder stays put when you update or reinstall Pete's Vinyl. ${l.safety_copies ? `${l.safety_copies} automatic safety cop${l.safety_copies === 1 ? "y is" : "ies are"} kept as well.` : ""}`;
+    } catch (_) { $("#libState").textContent = ""; }
+  };
+  libState();
+  const findLibraries = async () => {
+    const btn = $("#libFind");
+    btn.disabled = true; btn.textContent = "Searching this computer… (up to half a minute)";
+    try {
+      const { libraries } = await api("/api/library/find", { method: "POST" });
+      $("#libResults").innerHTML = libraries.length ? libraries.map((l, i) => `
+        <div class="helper-card" style="margin-top:14px">
+          <h3>${l.records} record${l.records === 1 ? "" : "s"} <span class="badge ${l.kind === "safety copy" ? "ready" : "collection"}">${esc(l.kind)}</span></h3>
+          <p class="muted" style="margin:0 0 6px">${esc(l.folder)}<br>Last changed ${esc(niceTime(l.modified))}${l.photos ? ` · ${l.photos} photo${l.photos === 1 ? "" : "s"}` : ""}${l.has_keys ? " · includes your API keys" : ""}</p>
+          ${l.examples.length ? `<p style="margin:0 0 10px">${l.examples.map(esc).join(" · ")}</p>` : ""}
+          <button type="button" class="btn btn-green btn-small" data-load="${i}">📥 Load this library</button>
+        </div>`).join("") : `<p class="muted" style="margin-top:12px">I couldn't find any other libraries on this computer.</p>`;
+      $$("[data-load]").forEach((b) => b.addEventListener("click", async () => {
+        const l = libraries[Number(b.dataset.load)];
+        const ok = await confirmBox(`Load the library with ${l.records} record${l.records === 1 ? "" : "s"} from ${l.folder}? Your current library is saved as a safety copy first, so you can always go back.`, "Yes, load it");
+        if (!ok) return;
+        b.disabled = true; b.textContent = "Loading…";
+        try {
+          const r = await api("/api/library/load", { method: "POST", body: { path: l.path } });
+          toast(r.message, !r.ok);
+          if (r.ok) { platformsCache = null; location.hash = "#/"; }
+        } catch (e) { toast(e.message, true); b.disabled = false; b.textContent = "📥 Load this library"; }
+      }));
+    } catch (e) { toast(e.message, true); }
+    btn.disabled = false; btn.textContent = "🔍 Find an old library on this computer";
+  };
+  $("#libFind").addEventListener("click", findLibraries);
+  if (autoFind) { $("#librarySection").scrollIntoView({ behavior: "smooth" }); findLibraries(); }
+
   psState();
   api("/api/version").then((v) => {
     const el = $("#versionLine"); if (!el) return;

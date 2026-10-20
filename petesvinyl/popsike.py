@@ -24,7 +24,7 @@ from . import activity, ai, browser, config, currency
 from .config import BASE_DIR
 
 log = logging.getLogger("petesvinyl.popsike")
-PROFILE_DIR = BASE_DIR / "popsike_profile"
+PROFILE_DIR = config.DATA_DIR / "popsike_profile"   # kept with the library, so the login survives updates
 HOME_URL = "https://www.popsike.com/"
 DEFAULT_SEARCH_URL = "https://www.popsike.com/php/quicksearch.php?searchtext={query}"
 _lock = asyncio.Lock()

@@ -4,12 +4,25 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-DB_PATH = Path(os.environ.get("PETESVINYL_DB", BASE_DIR / "vinyl_collection.db"))
-IMAGES_DIR = Path(os.environ.get("PETESVINYL_IMAGES", BASE_DIR / "images"))
+BASE_DIR = Path(__file__).resolve().parent.parent      # the app's program files (replaced by updates)
+
+
+def _default_data_dir() -> Path:
+    """Pete's library lives in ONE fixed place per Windows user, outside the program folder, so updating,
+    reinstalling or downloading the app again into another folder can never "lose" it."""
+    if os.name == "nt" and os.environ.get("LOCALAPPDATA"):
+        return Path(os.environ["LOCALAPPDATA"]) / "PetesVinyl"
+    return Path.home() / ".local" / "share" / "PetesVinyl"
+
+
+DATA_DIR = Path(os.environ.get("PETESVINYL_DATA") or _default_data_dir())
+DB_PATH = Path(os.environ.get("PETESVINYL_DB", DATA_DIR / "vinyl_collection.db"))
+IMAGES_DIR = Path(os.environ.get("PETESVINYL_IMAGES", DATA_DIR / "images"))
+SAFETY_DIR = DB_PATH.parent / "safety copies"          # automatic copies before updates, imports, and daily
+LEGACY_DIR = Path(os.environ.get("PETESVINYL_LEGACY_DIR", BASE_DIR))   # where older versions kept the library
 STATIC_DIR = BASE_DIR / "static"
 LOGS_DIR = BASE_DIR / "logs"
-BROWSER_PROFILE_DIR = BASE_DIR / "browser_profile"
+BROWSER_PROFILE_DIR = DATA_DIR / "browser_profile"
 
 # Every setting the app knows about, with its default. Keys marked secret are masked in the UI.
 DEFAULTS: dict[str, str] = {

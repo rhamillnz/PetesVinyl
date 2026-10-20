@@ -23,7 +23,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from petesvinyl import browser, popsike, version, activity, ai, backup, config, db, discogs, listings, publishers, valuation
+from petesvinyl import browser, library, popsike, version, activity, ai, backup, config, db, discogs, listings, publishers, valuation
 from petesvinyl.config import IMAGES_DIR, STATIC_DIR
 from petesvinyl.db import IMAGE_SLOTS, PLATFORMS
 
@@ -57,6 +57,7 @@ async def backup_loop() -> None:
 async def lifespan(_: FastAPI):
     IMAGES_DIR.mkdir(parents=True, exist_ok=True)
     db.connect()
+    library.safety_copy("daily", min_hours=20)   # one automatic safety copy a day, kept with the library
     task = asyncio.create_task(backup_loop())
     yield
     task.cancel()
@@ -603,6 +604,30 @@ def activity_log() -> dict[str, Any]:
 def backup_log() -> dict[str, Any]:
     entries = db.backup_history(100)
     return {"entries": entries, "last_ok": next((e for e in entries if e["ok"]), None), "status": backup.status()}
+
+
+class LibraryChoice(BaseModel):
+    path: str
+
+
+@app.get("/api/library")
+def library_info() -> dict[str, Any]:
+    info = library.current_summary()
+    info["safety_copies"] = len(list(config.SAFETY_DIR.glob("*.db"))) if config.SAFETY_DIR.exists() else 0
+    return info
+
+
+@app.post("/api/library/find")
+async def library_find() -> dict[str, Any]:
+    return {"libraries": await asyncio.to_thread(library.find_libraries)}
+
+
+@app.post("/api/library/load")
+async def library_load(body: LibraryChoice) -> dict[str, Any]:
+    result = await asyncio.to_thread(library.import_library, body.path)
+    activity.record("Library", "Loaded another library", result["ok"], result["message"])
+    mark_changed()
+    return result
 
 
 @app.get("/api/stats")
