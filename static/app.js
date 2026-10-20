@@ -1080,9 +1080,6 @@ const SETTINGS_SECTIONS = [
     ["EBAY_MARKETPLACE_ID", "Marketplace (EBAY_US, EBAY_GB, EBAY_AU)"], ["EBAY_CURRENCY", "Currency (USD, GBP, AUD)"],
     ["EBAY_CATEGORY_ID", "Category (176985 = Vinyl Records)"], ["EBAY_FULFILLMENT_POLICY_ID", "Shipping policy ID"],
     ["EBAY_PAYMENT_POLICY_ID", "Payment policy ID"], ["EBAY_RETURN_POLICY_ID", "Return policy ID"], ["EBAY_LOCATION_KEY", "Inventory location key"]]],
-  ["Popsike (past auction prices)", "Popsike archives what records really sold for on eBay. Log in once with the buttons below, then prices are read automatically.", [
-    ["POPSIKE_ENABLED", "Use Popsike prices (true/false)"],
-    ["POPSIKE_SEARCH_URL", "Popsike search address ({query} becomes the artist and album)"]]],
   ["Selling sites", "Which sites appear when selling (comma separated: trademe, discogs, ebay, facebook, gumtree).", [
     ["ENABLED_PLATFORMS", "Sites to use"]]],
   ["Backup", "Leave the folder empty to find Google Drive automatically.", [
@@ -1105,7 +1102,12 @@ async function renderSettings() {
           <button type="button" class="btn btn-green btn-small" id="psDone">✅ I've logged in</button>
           <button type="button" class="btn btn-chrome btn-small" id="psTest">🧪 Test Popsike</button>
         </div>
-        <p class="muted" style="margin-top:10px">Press <b>Log in</b>, then use "Log in with Google" on the Popsike window that opens (your Google password is only ever typed into Google's own page). When you're in, close that window and press <b>I've logged in</b>.</p></div>
+        <p class="muted" style="margin-top:10px">Press <b>Log in</b>, then use "Log in with Google" on the Popsike window that opens (your Google password is only ever typed into Google's own page). When you're in, press <b>I've logged in</b>.</p>
+        <div class="field" style="margin-top:14px"><label for="s_POPSIKE_SEARCH_URL">Popsike search address</label>
+          <input type="text" id="s_POPSIKE_SEARCH_URL" name="POPSIKE_SEARCH_URL" value="${esc(settings.POPSIKE_SEARCH_URL)}">
+          <span class="hint">Only change this if Test Popsike can't read prices. In the Popsike window that opens when you press <b>Log in</b> (it has an address bar), search for a record, copy the address from the bar, paste it here, and replace the artist and album words in it with <b>{query}</b>. Then press <b>Save settings</b> at the bottom of this page.</span></div>
+        <div class="field"><label for="s_POPSIKE_ENABLED">Use Popsike prices (true/false)</label>
+          <input type="text" id="s_POPSIKE_ENABLED" name="POPSIKE_ENABLED" value="${esc(settings.POPSIKE_ENABLED)}"></div></div>
       <div class="settings-section"><h2>Activity</h2>
         <a class="btn btn-chrome" href="#/logs">📜 What has the app been doing?</a></div>
       <div class="settings-section"><h2>Backup status</h2>
