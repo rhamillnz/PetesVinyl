@@ -93,7 +93,11 @@ async def fetch_page_text(url: str) -> dict[str, Any]:
         try:
             page = await ctx.new_page()
             resp = await page.goto(url, wait_until="domcontentloaded", timeout=45000)
-            await page.wait_for_timeout(2500)
+            try:
+                await page.wait_for_load_state("networkidle", timeout=15000)
+            except Exception:  # noqa: BLE001 - some pages never go fully idle; carry on with what's there
+                pass
+            await page.wait_for_timeout(1500)
             text = await page.inner_text("body")
             info = {"text": text, "title": await page.title(), "url": page.url, "status": resp.status if resp else None}
             try:
@@ -107,13 +111,20 @@ async def fetch_page_text(url: str) -> dict[str, Any]:
             await ctx.close()
 
 
-EXTRACT_PROMPT = """Below is the text of a Popsike search results page (a archive of finished eBay auctions) for: "{query}".
-List the SOLD auction results that are for THIS record: {artist} - {album} (vinyl LP). Skip other albums, CDs and unrelated items.
+EXTRACT_PROMPT = """Below is the text of a Popsike search results page (an archive of finished eBay auctions) for: "{query}".
+Each listing shows a title, a sold date, and one or two prices. When two prices are shown, the first is in the seller's
+own currency and the second is converted to US dollars. Count each LISTING once, and use the USD price when shown,
+otherwise the price shown. Ignore the filters, menus and anything that isn't a listing.
+
+The record being valued: {artist} - {album}, pressed {year} in {country}, label {label}, catalogue number {catno}.
+List the listings that are this album on vinyl (skip CDs, cassettes, singles, other albums, bundles of several records).
+For each, set "same_pressing" to true if the title suggests the same pressing (same year, country, label or
+catalogue number), false if it's clearly a different one (e.g. a reissue or audiophile edition), or null if unclear.
+
 Reply with ONLY a JSON object:
-{{"results": [{{"title": "", "price": 0.0, "currency": "USD", "date": "", "condition": ""}}],
+{{"results": [{{"title": "", "price": 0.0, "currency": "USD", "date": "", "same_pressing": null}}],
   "login_needed": false, "note": "one short sentence about what the page showed"}}
-Use the final sold price shown, and the currency symbol/code shown (USD if it says $). If the page asks the visitor to
-log in, sets login_needed to true. If there are no matching results, return an empty list.
+If the page asks the visitor to log in, set login_needed to true. If nothing matches, return an empty list.
 
 PAGE TEXT:
 {text}"""
@@ -122,20 +133,57 @@ PRICE_RE = re.compile(r"(US\s?\$|A\$|NZ\$|\$|£|€|USD|GBP|EUR)\s?([\d][\d,]*(?
 SYMBOL_CUR = {"$": "USD", "US$": "USD", "US $": "USD", "A$": "AUD", "NZ$": "NZD", "£": "GBP", "€": "EUR"}
 
 
+def _norm(text: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", (text or "").lower())
+
+
+def _looks_same(title: str, rec: dict[str, Any]) -> bool | None:
+    """Does a listing title mention this pressing's catalogue number or year?"""
+    t = _norm(title)
+    cat = _norm(rec.get("catalog_number") or "")
+    if cat and len(cat) >= 4 and cat in t:
+        return True
+    year = (rec.get("year_pressed") or "").strip()[:4]
+    if year.isdigit() and year in title:
+        return True
+    return None
+
+
 def _fallback_parse(text: str, rec: dict[str, Any]) -> list[dict[str, Any]]:
-    """No AI available: take prices from lines that mention the album title."""
+    """No AI (or it found nothing): read the page the way it is laid out.
+
+    Popsike shows each listing as a title line, then a date line, then one or two price lines (the seller's currency,
+    then US dollars). So: start a listing at each title line that mentions the album, and collect the prices that
+    follow it, up to the next title.
+    """
     words = [w for w in re.findall(r"[a-z0-9]+", (rec.get("album_title") or "").lower()) if len(w) > 3]
-    out = []
-    for line in text.splitlines():
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    items: list[dict[str, Any]] = []
+    cur: dict[str, Any] | None = None
+    since_title = 0
+    for line in lines:
         low = line.lower()
-        if words and not any(w in low for w in words):
+        prices = PRICE_RE.findall(line)
+        if not prices and len(line) > 15 and (not words or any(w in low for w in words)):
+            cur = {"title": line[:90], "prices": []}
+            items.append(cur)
+            since_title = 0
             continue
-        for sym, amount in PRICE_RE.findall(line):
-            cur = SYMBOL_CUR.get(sym.replace(" ", ""), sym.upper()) if sym not in SYMBOL_CUR else SYMBOL_CUR[sym]
-            try:
-                out.append({"title": line.strip()[:80], "price": float(amount.replace(",", "")), "currency": cur})
-            except ValueError:
-                continue
+        since_title += 1
+        if cur is not None and prices and since_title <= 6:
+            for sym, amount in prices:
+                code = SYMBOL_CUR.get(sym.replace(" ", ""), sym.upper().replace(" ", ""))
+                try:
+                    cur["prices"].append((code, float(amount.replace(",", ""))))
+                except ValueError:
+                    continue
+    out = []
+    for item in items:
+        if not item["prices"]:
+            continue
+        usd = [p for p in item["prices"] if p[0] == "USD"]
+        code, amount = (usd or item["prices"])[0]          # one price per listing, USD if shown
+        out.append({"title": item["title"], "price": amount, "currency": code, "same_pressing": _looks_same(item["title"], rec)})
     return out[:30]
 
 
@@ -170,18 +218,25 @@ async def lookup(rec: dict[str, Any]) -> dict[str, Any]:
     if ai.is_configured():
         try:
             data = await ai.chat_json([{"type": "text", "text": EXTRACT_PROMPT.format(
-                query=query, artist=rec.get("artist") or "", album=rec.get("album_title") or "", text=text[:14000])}],
-                web_search=False, max_tokens=2500)
+                query=query, artist=rec.get("artist") or "", album=rec.get("album_title") or "",
+                year=rec.get("year_pressed") or "unknown", country=rec.get("pressing_location") or "unknown",
+                label=rec.get("label") or "unknown", catno=rec.get("catalog_number") or "unknown",
+                text=text[:14000])}], web_search=False, max_tokens=3000)
             rows = [r for r in data.get("results") or [] if isinstance(r, dict) and r.get("price")]
             result["note"] = data.get("note") or ""
             if data.get("login_needed"):
                 result["note"] = "Popsike wants a login: Settings -> Connect Popsike."
         except (ai.AIUnavailable, ValueError) as exc:
             result["note"] = f"Couldn't read the page with the AI: {exc}"
-    if not rows and not ai.is_configured():
+    if not rows:        # no AI key, or the AI found nothing: read the page directly
         rows = _fallback_parse(text, rec)
+    same = [r for r in rows if r.get("same_pressing") is True]
+    chosen = same if len(same) >= 3 else rows     # favour the same pressing when there are enough of them
+    if rows:
+        result["note"] = (result["note"] + " " if result["note"] else "") + (
+            f"{len(same)} of {len(rows)} look like the same pressing" + (", using those." if len(same) >= 3 else ", using all."))
     prices = []
-    for r in rows:
+    for r in chosen:
         try:
             converted = await currency.convert(float(r["price"]), str(r.get("currency") or "USD"), home)
         except (TypeError, ValueError):
@@ -191,8 +246,9 @@ async def lookup(rec: dict[str, Any]) -> dict[str, Any]:
     if prices:
         result["median"] = statistics.median(prices)
         result["count"] = len(prices)
+    examples = "; ".join(f"{str(r.get('title'))[:45]} {r.get('currency')} {r.get('price')}" for r in chosen[:3])
     activity.record("Popsike", f"Sold auctions for {query}", bool(prices),
-                    f"{len(prices)} sale prices found" + (f", middle price {home} {result['median']:.0f}" if prices else "")
+                    (f"Examples: {examples}. " if examples else "") + f"{len(prices)} sale prices found" + (f", middle price {home} {result['median']:.0f}" if prices else "")
                     + (f". {result['note']}" if result["note"] else "")
                     + ("" if prices else f"\n{seen}\n(A screenshot and the page text are saved in the logs folder: "
                                           "popsike_last.png and popsike_last.txt)"))
