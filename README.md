@@ -71,9 +71,11 @@ What it does for you:
 - creates a private Python environment (the `venv` folder) and installs everything the app needs
 - downloads a backup browser for the Facebook/Gumtree helper (optional; Chrome is used if installed)
 - copies `.env.example` to `.env`
-- puts a **Pete's Vinyl** shortcut with a vinyl-record icon on the desktop
+- puts two shortcuts on the desktop: **Pete's Vinyl** (a vinyl-record icon) to start the app, and **Update Pete's Vinyl** (the record with a green arrow) to get the latest version
 
-It is **safe to run again** at any time. It repairs a broken or half-finished install and keeps your records.
+The Update icon needs **Git for Windows** (<https://git-scm.com/download/win>, free, default options). If it isn't installed, the installer says so, and the Update icon tells you when you first use it.
+
+The installer is **safe to run again** at any time. It repairs a broken or half-finished install and keeps your records.
 
 <details><summary>Doing it by hand instead (PowerShell)</summary>
 
@@ -152,6 +154,7 @@ Every backup is checked after it's made and recorded in **⚙️ Settings → �
 | The taskbar button shows the **Chrome logo** instead of the record | Unpin it, then pin the **desktop shortcut** (right-click → *Show more options* → *Pin to taskbar*), not the running window. |
 | The app won't stop, or port 8000 seems busy | Press ⏻ Stop in the app, or run `Stop_PetesVinyl.bat`. If it was ever started as Administrator, stop it once from an Administrator PowerShell, then always start it normally. |
 | Popsike log says **"0 sale prices found"** | The page loaded but no prices could be read. The log line now shows what Popsike returned, and `logs\popsike_last.png` / `popsike_last.txt` hold a screenshot and the page text. Most often the **Popsike search address** (Settings) is wrong: search for a record on Popsike yourself, copy the address from the browser, put `{query}` where the artist and album words were, and paste it into **Settings → Popsike login → Popsike search address**. If the page asks you to log in, use *Log in to Popsike* again. |
+| The **Update** icon says Git isn't installed, or couldn't reach GitHub | Install **Git for Windows** from <https://git-scm.com/download/win> (default options), check the internet connection, and try again. If a GitHub sign-in window opens, sign in there. |
 | Discogs says **"You must fill out your seller settings first"** | Complete <https://www.discogs.com/settings/seller>. Until then the app uses the cheapest copy for sale instead of Discogs' suggested price. |
 
 **Starting over without losing records:** delete only the `venv` folder and run `Install_PetesVinyl.bat`. Your records live
@@ -200,7 +203,9 @@ petesvinyl/
   backup.py             Google Drive for Desktop backup
   currency.py           exchange rates (open.er-api.com, offline fallback)
 static/                 index.html + app.css + app.js + vinyl.ico (no frameworks, no build step)
-tools/make_icon.py      draws static/vinyl.ico (pure Python)
+tools/make_icon.py      draws static/vinyl.ico and update.ico (pure Python)
+tools/make_shortcuts.ps1  creates the two desktop shortcuts
+Update_PetesVinyl.bat   the desktop "Update" icon: git pull + install new parts + restart
 images/record_<id>/     the photos (front, back, disc_a, disc_b)
 ```
 
@@ -217,16 +222,25 @@ Interactive API docs are at <http://localhost:8000/docs>.
 
 ## Updating, and "the app needs a restart"
 
-**If you used Git (Option B):** open PowerShell and run `cd C:\PetesVinyl` then `git pull origin main`.
-**If you used the ZIP (Option A):** download a fresh ZIP and copy its files over the app folder, letting Windows replace
-the old ones. Don't delete `vinyl_collection.db`, `images`, `.env` or `venv`, and the ZIP doesn't contain them, so
-they stay put. If the update added new parts, run `Install_PetesVinyl.bat` again (it's safe).
+**The easy way: double-click the green-arrow icon "Update Pete's Vinyl" on the desktop.** It closes the app, gets the
+latest version from GitHub (`git pull origin main`), shows what changed, installs any new parts the update needs, and
+opens the app again. Your records, photos and keys are never touched.
 
-Then just double-click **Pete's Vinyl** on the desktop again.
-The launcher compares the code on disk with the code the running copy started with, and if they differ it
-restarts the app automatically. If a page ever shows **"Not Found"** or a red *"needs a restart"* bar, the
-running copy is older than the files on disk: run `Stop_PetesVinyl.bat`, then start the app again.
-(If it was started as Administrator, a normal launch cannot stop it. Stop it once from an Administrator
+- It needs **Git for Windows** (free). If it's missing, the window tells you where to get it.
+- If the app was installed from a ZIP file, the first update links it to GitHub automatically (once).
+- If some program files were changed by hand so the update can't be applied cleanly, it asks whether to replace them
+  with the latest version (Y/N). Your records, photos and keys are unaffected either way.
+- Older installs don't have the icon yet. Double-click `Update_PetesVinyl.bat` in the app folder once (or run
+  `Install_PetesVinyl.bat` again) and it puts the icon on the desktop.
+
+**By hand instead:** open PowerShell, run `cd C:\PetesVinyl` then `git pull origin main`. (If you installed from a ZIP and
+don't want to use the Update icon, download a fresh ZIP and copy its files over the app folder. Don't delete
+`vinyl_collection.db`, `images`, `.env` or `venv`; the ZIP doesn't contain them, so they stay put.)
+
+Then just double-click **Pete's Vinyl** on the desktop again. The launcher compares the code on disk with the code the
+running copy started with, and if they differ it restarts the app automatically. If a page ever shows **"Not Found"** or
+a red *"needs a restart"* bar, the running copy is older than the files on disk: run `Stop_PetesVinyl.bat`, then start
+the app again. (If it was started as Administrator, a normal launch cannot stop it. Stop it once from an Administrator
 PowerShell, then always start it normally.)
 
 ---

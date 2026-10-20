@@ -64,15 +64,23 @@ if errorlevel 1 echo   (That part is optional. Pete's Vinyl works without it as 
 
 if not exist ".env" copy ".env.example" ".env" >nul
 
-REM --- 6. Desktop shortcut with the record icon.
+REM --- 6. Desktop shortcuts: "Pete's Vinyl" (record icon) and "Update Pete's Vinyl" (record icon with a green arrow).
 echo.
-echo Putting a "Pete's Vinyl" shortcut with the record icon on the desktop...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$d=$env:APPDIR; $s=(New-Object -ComObject WScript.Shell).CreateShortcut([Environment]::GetFolderPath('Desktop')+'\Pete''s Vinyl.lnk'); $s.TargetPath=$d+'\Start_PetesVinyl.bat'; $s.WorkingDirectory=$d; $s.WindowStyle=7; $s.IconLocation=$d+'\static\vinyl.ico'; $s.Description='Pete''s Vinyl'; $s.Save()"
-if errorlevel 1 echo   (Couldn't make the desktop shortcut. You can still start the app with Start_PetesVinyl.bat.)
+echo Putting the "Pete's Vinyl" and "Update Pete's Vinyl" shortcuts on the desktop...
+powershell -NoProfile -ExecutionPolicy Bypass -File "tools\make_shortcuts.ps1" -AppDir "%APPDIR%" -Force
+if errorlevel 1 echo   (Couldn't make the desktop shortcuts. You can still start the app with Start_PetesVinyl.bat.)
+
+REM --- 7. The Update icon needs Git (free). Not needed for anything else, so just mention it.
+git --version >nul 2>&1
+if errorlevel 1 (
+    echo.
+    echo   Note: to use the "Update Pete's Vinyl" icon later, install Git for Windows from https://git-scm.com/download/win
+)
 
 echo.
 echo  ==================================================
 echo   All done!  Double-click "Pete's Vinyl" on the desktop to start.
+echo   Later, double-click "Update Pete's Vinyl" to get the latest version.
 echo   To keep it on the taskbar: right-click the desktop shortcut,
 echo   choose "Show more options", then "Pin to taskbar".
 echo  ==================================================

@@ -1,4 +1,4 @@
-"""Draw the Pete's Vinyl record icon (static/vinyl.ico). Pure Python, no extra packages.
+"""Draw the Pete's Vinyl icons (static/vinyl.ico and static/update.ico). Pure Python, no extra packages.
 
 Run:  python tools/make_icon.py
 The .ico holds several sizes so Windows can show it sharply on the desktop, taskbar and in Alt-Tab.
@@ -14,8 +14,25 @@ SIZES = [16, 24, 32, 48, 64, 128, 256]
 SS = 3  # supersampling (SS x SS samples per pixel) for smooth edges
 
 
-def shade(x: float, y: float) -> tuple[int, int, int, int]:
-    """Colour at a point of the unit square (0..1), RGBA. Alpha 0 outside the disc."""
+def _in_arrow(px: float, py: float) -> bool:
+    """A white 'up' arrow, in coordinates relative to the badge centre (y grows downwards)."""
+    if -0.04 <= px <= 0.04 and -0.01 <= py <= 0.12:        # stem
+        return True
+    if -0.13 <= py <= -0.01:                              # head: a triangle pointing up
+        return abs(px) <= (py + 0.13) / 0.12 * 0.11
+    return False
+
+
+def shade(x: float, y: float, update: bool = False) -> tuple[int, int, int, int]:
+    """Colour at a point of the unit square (0..1), RGBA. Alpha 0 outside the disc.
+    With update=True a green badge with an up-arrow is drawn in the bottom-right corner."""
+    if update:
+        bx, by = x - 0.74, y - 0.74
+        br = math.hypot(bx, by)
+        if br <= 0.25:
+            if br > 0.215:
+                return (255, 255, 255, 255)                # white ring
+            return (255, 255, 255, 255) if _in_arrow(bx, by) else (46, 168, 84, 255)
     dx, dy = x - 0.5, y - 0.5
     r = math.hypot(dx, dy)
     if r > 0.49:
@@ -35,7 +52,7 @@ def shade(x: float, y: float) -> tuple[int, int, int, int]:
     return (v, v, v + 2, 255)
 
 
-def render(size: int) -> bytes:
+def render(size: int, update: bool = False) -> bytes:
     rows = []
     for py in range(size):
         row = bytearray([0])  # PNG filter byte: none
@@ -43,7 +60,7 @@ def render(size: int) -> bytes:
             rs = gs = bs = a_sum = 0
             for sy in range(SS):
                 for sx in range(SS):
-                    r, g, b, a = shade((px + (sx + 0.5) / SS) / size, (py + (sy + 0.5) / SS) / size)
+                    r, g, b, a = shade((px + (sx + 0.5) / SS) / size, (py + (sy + 0.5) / SS) / size, update)
                     rs += r * a; gs += g * a; bs += b * a; a_sum += a
             if a_sum:
                 row += bytes([rs // a_sum, gs // a_sum, bs // a_sum, a_sum // (SS * SS)])
@@ -60,8 +77,8 @@ def render(size: int) -> bytes:
     return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr) + chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b"")
 
 
-def main() -> None:
-    images = [(s, render(s)) for s in SIZES]
+def write_ico(name: str, update: bool) -> None:
+    images = [(sz, render(sz, update)) for sz in SIZES]
     header = struct.pack("<HHH", 0, 1, len(images))
     offset = 6 + 16 * len(images)
     directory, blobs = b"", b""
@@ -69,9 +86,14 @@ def main() -> None:
         directory += struct.pack("<BBBBHHII", size % 256, size % 256, 0, 0, 1, 32, len(png), offset)
         blobs += png
         offset += len(png)
-    out = Path(__file__).resolve().parent.parent / "static" / "vinyl.ico"
+    out = Path(__file__).resolve().parent.parent / "static" / name
     out.write_bytes(header + directory + blobs)
     print(f"Wrote {out} ({out.stat().st_size // 1024} KB, sizes {SIZES})")
+
+
+def main() -> None:
+    write_ico("vinyl.ico", update=False)
+    write_ico("update.ico", update=True)
 
 
 if __name__ == "__main__":
