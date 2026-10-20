@@ -191,6 +191,7 @@ async function route() {
   refreshStats();
   const parts = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
   window.scrollTo(0, 0);
+  if (Date.now() - lastVersionCheck > 20000) { lastVersionCheck = Date.now(); checkVersion(); }
   try {
     if (parts[0] === "add") return await renderPhotos(null);
     if (parts[0] === "settings") return await renderSettings();
@@ -1213,6 +1214,7 @@ async function renderSettings() {
   app.innerHTML = `
     <div class="row" style="margin-bottom:18px"><a class="btn btn-chrome btn-small" href="#/">⬅ Back to my records</a></div>
     <form class="panel" id="settingsForm" autocomplete="off">
+      <p class="muted" id="versionLine" style="float:right;margin:0"></p>
       <h1>⚙️ Settings</h1>
       <p class="muted">This page is for setting things up. Once it's done you won't need to come back here.</p>
       <div class="settings-section"><h2>Camera</h2>
@@ -1260,6 +1262,10 @@ async function renderSettings() {
     } catch (_) { $("#popsikeState").textContent = ""; }
   };
   psState();
+  api("/api/version").then((v) => {
+    const el = $("#versionLine"); if (!el) return;
+    el.textContent = v.git && v.git.commit ? `Version ${v.git.commit} · ${v.git.date}` : `Version ${v.running}`;
+  }).catch(() => {});
   $("#psLogin").addEventListener("click", async () => { const r = await api("/api/popsike/connect", { method: "POST" }); toast(r.message, !r.ok); });
   $("#psDone").addEventListener("click", async () => { const r = await api("/api/popsike/done", { method: "POST" }); toast(r.message, !r.ok); psState(); });
   $("#psTest").addEventListener("click", async () => {
@@ -1356,6 +1362,17 @@ async function renderLogs() {
 }
 
 // ------------------------------------------------------------------ start
+// The version of the page files this window loaded (the script link carries it). If the files on disk have since
+// changed, an update happened while this window stayed open, so offer a one-click reload.
+const LOADED_V = (() => { try { return new URL(document.currentScript.src).searchParams.get("v") || ""; } catch (_) { return ""; } })();
+let lastVersionCheck = 0;
+function showReloadBanner() {
+  if ($("#reloadBanner")) return;
+  document.body.insertAdjacentHTML("afterbegin", `<div id="reloadBanner" class="restart-banner" style="cursor:pointer">
+    ✨ <b>Pete's Vinyl was updated.</b> Click here to load the new version.</div>`);
+  $("#reloadBanner").addEventListener("click", () => location.reload());
+}
+
 function showRestartBanner() {
   if ($("#restartBanner")) return;
   document.body.insertAdjacentHTML("afterbegin", `<div id="restartBanner" class="restart-banner">
@@ -1366,6 +1383,7 @@ async function checkVersion() {
   try {
     const v = await api("/api/version");
     if (v.stale) showRestartBanner();
+    else if (LOADED_V && v.static && v.static !== LOADED_V) showReloadBanner();
   } catch (e) {
     if (!(e instanceof TypeError)) showRestartBanner();   // "Not Found": this server predates the update
   }

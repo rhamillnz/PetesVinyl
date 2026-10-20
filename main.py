@@ -189,7 +189,8 @@ def _image_files(rec: dict[str, Any]) -> dict[str, Path]:
 @app.get("/api/version")
 def app_version() -> dict[str, Any]:
     on_disk = version.code_fingerprint()
-    return {"running": version.STARTED_WITH, "on_disk": on_disk, "stale": on_disk != version.STARTED_WITH}
+    return {"running": version.STARTED_WITH, "on_disk": on_disk, "stale": on_disk != version.STARTED_WITH,
+            "static": _static_version(), "git": version.git_info()}
 
 
 @app.get("/api/health")
