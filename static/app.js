@@ -213,6 +213,7 @@ async function route() {
     if (parts[0] === "add") return await renderPhotos(null);
     if (parts[0] === "settings") return await renderSettings(parts[1] === "find");
     if (parts[0] === "logs") return await renderLogs();
+    if (parts[0] === "cordys") return await renderCordys();
     if (parts[0] === "record" && parts[1]) {
       const id = Number(parts[1]);
       const page = parts[2] || "";
@@ -261,6 +262,7 @@ async function renderHome() {
     <div class="home-bar">
       <a class="btn btn-huge" href="#/add">➕ Add a Record</a>
       <input class="search" id="search" type="search" placeholder="🔍  Find a record…" value="${esc(home.q)}" aria-label="Find a record">
+      <a class="btn btn-chrome" href="#/cordys">🔨 Export to Cordy's Auction</a>
     </div>
     <div class="home-bar">
       <div class="tabs" role="group" aria-label="Show">
@@ -343,6 +345,117 @@ function cardHTML(r, code = "") {
       <div class="card-foot">${badge}<span>${price}</span></div>
       ${listedOn.length ? `<div class="sites">On: ${esc(listedOn.join(", "))}</div>` : ""}
     </a>`;
+}
+
+// ------------------------------------------------------------------ Cordy's auction export
+const CORDYS_STYLES = [
+  ["sheet", "📊 Spreadsheet and photos", "One zip file: a spreadsheet with a row for each record, and all the photos numbered to match. Best if Cordy's want to load everything into their own system."],
+  ["folders", "📁 One folder per record", "One zip file with a folder for each record, holding its photos and a description. Best if they enter each record by hand."],
+  ["pdf", "📖 PDF catalogue", "One file with a page for each record, showing its photos and details. Easy to read, print or email."],
+];
+const cordysChoice = { ids: new Set(), style: "sheet", small: true, prices: false };
+
+function fileSize(bytes) {
+  return bytes < 1048576 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1048576).toFixed(1)} MB`;
+}
+
+async function renderCordys() {
+  app.innerHTML = loadingHTML("Loading your records…");
+  const data = await api("/api/records");
+  await getPlatforms();
+  const records = data.records.filter((r) => r.state !== "sold").sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
+  const known = new Set(records.map((r) => r.id));
+  cordysChoice.ids = new Set([...cordysChoice.ids].filter((id) => known.has(id)));
+
+  const rowHTML = (r) => {
+    const listed = (platformsCache || []).filter((p) => r[`${p.id}_status`] === "listed").map((p) => p.name);
+    const notes = [r.cordys_exported_at ? `Exported ${esc(ago(r.cordys_exported_at))}` : "",
+      listed.length ? `For sale on ${esc(listed.join(", "))}` : ""].filter(Boolean).join(" · ");
+    return `<label class="cordys-row">
+      <input type="checkbox" data-id="${r.id}" ${cordysChoice.ids.has(r.id) ? "checked" : ""}>
+      <span class="cordys-thumb">${r.images.front ? `<img src="${esc(r.images.front)}" alt="" loading="lazy">` : ""}</span>
+      <span><b>${esc(r.artist || "Unknown artist")}</b><br>${esc(r.album_title || "Untitled")}
+      ${notes ? `<br><small class="muted">${notes}</small>` : ""}</span></label>`;
+  };
+
+  app.innerHTML = `
+    <div class="row" style="margin-bottom:18px"><a class="btn btn-chrome btn-small" href="#/">⬅ Back to all my records</a></div>
+    <div class="panel">
+      <h1>Export to Cordy's Auction</h1>
+      <p>Wrap up your photos and descriptions into one file to send to Cordy's. Your records aren't changed.</p>
+      <h2>1. Tick the records</h2>
+      ${records.length ? `<div class="row" style="margin-bottom:12px">
+        <button class="btn btn-chrome btn-small" id="cordysAll">Tick all</button>
+        <button class="btn btn-chrome btn-small" id="cordysNone">Untick all</button>
+        <b id="cordysCount"></b></div>
+      <div class="cordys-list">${records.map(rowHTML).join("")}</div>` : `<p>You have no unsold records to export yet.</p>`}
+      <h2>2. Choose a style</h2>
+      ${CORDYS_STYLES.map(([key, name, about]) => `<label class="cordys-style">
+        <input type="radio" name="cordysStyle" value="${key}" ${cordysChoice.style === key ? "checked" : ""}>
+        <span><b>${name}</b><br>${about}</span></label>`).join("")}
+      <h2>3. Extras</h2>
+      <label class="cordys-style" id="cordysSmallRow"><input type="checkbox" id="cordysSmall" ${cordysChoice.small ? "checked" : ""}>
+        <span><b>Make the photos smaller</b><br>Easier to email. Untick to send the full-size photos. (The PDF always uses smaller photos.)</span></label>
+      <label class="cordys-style"><input type="checkbox" id="cordysPrices" ${cordysChoice.prices ? "checked" : ""}>
+        <span><b>Include my suggested prices</b><br>Left off to begin with, because Cordy's set their own estimates with you.</span></label>
+      <p style="margin-top:20px"><button class="btn btn-green btn-block" id="cordysGo">🎁 Wrap them up</button></p>
+      <div id="cordysResult"></div>
+    </div>`;
+
+  const paint = () => {
+    const n = cordysChoice.ids.size;
+    const count = $("#cordysCount");
+    if (count) count.textContent = `${n} of ${records.length} ticked`;
+    $("#cordysGo").disabled = !n;
+    $("#cordysSmallRow").style.opacity = cordysChoice.style === "pdf" ? ".5" : "1";
+    $("#cordysSmall").disabled = cordysChoice.style === "pdf";
+  };
+  const setAll = (on) => {
+    cordysChoice.ids = new Set(on ? records.map((r) => r.id) : []);
+    $$(".cordys-row input").forEach((box) => { box.checked = on; });
+    paint();
+  };
+  $$(".cordys-row input").forEach((box) => box.addEventListener("change", () => {
+    const id = Number(box.dataset.id);
+    if (box.checked) cordysChoice.ids.add(id); else cordysChoice.ids.delete(id);
+    paint();
+  }));
+  if (records.length) {
+    $("#cordysAll").addEventListener("click", () => setAll(true));
+    $("#cordysNone").addEventListener("click", () => setAll(false));
+  }
+  $$('input[name="cordysStyle"]').forEach((r) => r.addEventListener("change", () => { cordysChoice.style = r.value; paint(); }));
+  $("#cordysSmall").addEventListener("change", (e) => { cordysChoice.small = e.target.checked; });
+  $("#cordysPrices").addEventListener("change", (e) => { cordysChoice.prices = e.target.checked; });
+
+  $("#cordysGo").addEventListener("click", async () => {
+    const go = $("#cordysGo");
+    const box = $("#cordysResult");
+    go.disabled = true;
+    box.innerHTML = loadingHTML("Wrapping up your records. With lots of photos this can take a few minutes…");
+    box.scrollIntoView({ behavior: "smooth", block: "center" });
+    try {
+      const res = await api("/api/cordys/export", { method: "POST", body: {
+        record_ids: [...cordysChoice.ids], style: cordysChoice.style,
+        small_photos: cordysChoice.small, include_prices: cordysChoice.prices } });
+      box.innerHTML = `<div class="helper-card done">
+        <h3>✅ All wrapped up</h3>
+        <p>${res.records} record${res.records === 1 ? "" : "s"}, ${res.photos} photo${res.photos === 1 ? "" : "s"}, ${fileSize(res.size)}.</p>
+        <p>${res.fits_email ? "This is small enough to email." : "This is too big for most email. Share it from Google Drive or put it on a USB stick instead."}</p>
+        ${res.warnings.length ? `<p><b>Worth checking:</b></p><ul>${res.warnings.map((w) => `<li>${esc(w)}</li>`).join("")}</ul>` : ""}
+        <div class="row">
+          <a class="btn btn-small" href="/api/cordys/file/${encodeURIComponent(res.file)}" download>💾 Save a copy</a>
+          <button class="btn btn-chrome btn-small" id="cordysFolder">📂 Show me the file</button>
+        </div></div>`;
+      $("#cordysFolder").addEventListener("click", () => api("/api/cordys/open-folder", { method: "POST" }));
+      box.scrollIntoView({ behavior: "smooth", block: "center" });
+      toast("All wrapped up.");
+    } catch (e) {
+      box.innerHTML = `<div class="helper-card"><p>${esc(e.message)}</p></div>`;
+    }
+    go.disabled = false;
+  });
+  paint();
 }
 
 // ------------------------------------------------------------------ STEP 1: photos

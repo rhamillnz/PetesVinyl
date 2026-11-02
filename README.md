@@ -195,6 +195,21 @@ Pete always checks it and presses *Post* himself. Websites change their layouts,
 
 ---
 
+## Selling at Cordy's auction
+
+**Export to Cordy's Auction** on the home page wraps up the ticked records so they can be sent to Cordy's (John Cordy Ltd,
+Auckland), who ran six record sales between 2022 and 2025. There are three styles, because we don't yet know which they prefer:
+
+- **Spreadsheet and photos**: a zip with one spreadsheet row per record and all the photos numbered to match
+- **One folder per record**: a zip with each record's photos and a `description.txt`
+- **PDF catalogue**: one file with a page per record
+
+The wording follows their past lots, such as `THE BAND 'ROCK OF AGES' 2 LP MFSL 2-348`, and includes the Discogs release ID
+they list. Each record has a reference that never changes (PV0012), because Cordy's choose their own lot numbers. Suggested
+prices are left out unless you tick the box. Finished files are kept in the `Cordys exports` folder inside the library.
+
+---
+
 ## How it works (for the tech-minded)
 
 ```

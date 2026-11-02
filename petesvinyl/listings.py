@@ -150,9 +150,8 @@ def make_title(rec: dict[str, Any], max_len: int) -> str:
     return title[:max_len]
 
 
-def make_description(rec: dict[str, Any], platform: str) -> str:
-    lines = [f"{rec.get('artist') or 'Unknown artist'} - {rec.get('album_title') or 'Untitled'}", ""]
-    details = [
+def detail_pairs(rec: dict[str, Any]) -> list[tuple[str, Any]]:
+    return [
         ("Label", rec.get("label")),
         ("Catalogue number", rec.get("catalog_number")),
         ("Pressed", rec.get("year_pressed")),
@@ -161,7 +160,11 @@ def make_description(rec: dict[str, Any], platform: str) -> str:
         ("Matrix / runout", rec.get("matrix_numbers")),
         ("Barcode", rec.get("barcode")),
     ]
-    for label, value in details:
+
+
+def make_description(rec: dict[str, Any], platform: str) -> str:
+    lines = [f"{rec.get('artist') or 'Unknown artist'} - {rec.get('album_title') or 'Untitled'}", ""]
+    for label, value in detail_pairs(rec):
         if value:
             lines.append(f"{label}: {value}")
     discs = int(rec.get("disc_count") or 1)

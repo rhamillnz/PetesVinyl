@@ -23,7 +23,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from petesvinyl import browser, library, popsike, version, activity, ai, backup, config, db, discogs, listings, publishers, valuation
+from petesvinyl import browser, cordys, library, popsike, version, activity, ai, backup, config, db, discogs, listings, publishers, valuation
 from petesvinyl.config import IMAGES_DIR, STATIC_DIR
 from petesvinyl.db import IMAGE_SLOTS, PLATFORMS
 
@@ -131,6 +131,13 @@ class DiscogsMatch(BaseModel):
     release_id: str
 
 
+class CordysExport(BaseModel):
+    record_ids: list[int]
+    style: str
+    small_photos: bool = True
+    include_prices: bool = False
+
+
 # --------------------------------------------------------------------------- helpers
 def _require(record_id: int) -> dict[str, Any]:
     rec = db.get_record(record_id)
@@ -184,6 +191,19 @@ def _save_images(record_id: int, images: dict[str, str], labels: dict[str, str] 
 
 def _image_files(rec: dict[str, Any]) -> dict[str, Path]:
     return {slot: IMAGES_DIR / rec[col] for slot, col in IMAGE_SLOTS.items() if rec.get(col)}
+
+
+def _open_in_explorer(folder: Path) -> dict[str, Any]:
+    try:
+        if sys.platform == "win32":
+            os.startfile(folder)  # type: ignore[attr-defined]
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(folder)])
+        else:
+            subprocess.Popen(["xdg-open", str(folder)])
+        return {"ok": True, "folder": str(folder)}
+    except OSError as exc:
+        return {"ok": False, "folder": str(folder), "message": str(exc)}
 
 
 # --------------------------------------------------------------------------- records
@@ -449,16 +469,37 @@ def open_folder(record_id: int) -> dict[str, Any]:
     _require(record_id)
     folder = (IMAGES_DIR / f"record_{record_id}").resolve()
     folder.mkdir(parents=True, exist_ok=True)
+    return _open_in_explorer(folder)
+
+
+# --------------------------------------------------------------------------- Cordy's auction export
+@app.post("/api/cordys/export")
+async def cordys_export(body: CordysExport) -> dict[str, Any]:
+    """Wrap up the chosen records for Cordy's in the chosen style."""
     try:
-        if sys.platform == "win32":
-            os.startfile(folder)  # type: ignore[attr-defined]
-        elif sys.platform == "darwin":
-            subprocess.Popen(["open", str(folder)])
-        else:
-            subprocess.Popen(["xdg-open", str(folder)])
-        return {"ok": True, "folder": str(folder)}
-    except OSError as exc:
-        return {"ok": False, "folder": str(folder), "message": str(exc)}
+        result = await asyncio.to_thread(cordys.build, body.record_ids, body.style, body.small_photos, body.include_prices)
+    except cordys.CordysError as exc:
+        activity.record("Cordy's", "Export failed", False, str(exc))
+        raise HTTPException(400, str(exc)) from exc
+    for record_id in result["record_ids"]:
+        db.update_record(record_id, {"cordys_exported_at": db.now()})
+    activity.record("Cordy's", f"Wrapped up {result['records']} records", True, result["file"])
+    mark_changed()
+    return result
+
+
+@app.get("/api/cordys/file/{name}")
+def cordys_file(name: str) -> FileResponse:
+    path = cordys.export_path(name)
+    if path is None:
+        raise HTTPException(404, "That file isn't there any more. Please wrap the records up again.")
+    return FileResponse(path, filename=path.name)
+
+
+@app.post("/api/cordys/open-folder")
+def cordys_open_folder() -> dict[str, Any]:
+    cordys.EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+    return _open_in_explorer(cordys.EXPORT_DIR.resolve())
 
 
 # --------------------------------------------------------------------------- settings & backup

@@ -61,6 +61,7 @@ COLUMNS: list[tuple[str, str]] = [
     ("facebook_status", "TEXT DEFAULT 'not_listed'"),
     ("gumtree_status", "TEXT DEFAULT 'not_listed'"),
     ("listing_links", "TEXT DEFAULT '{}'"),
+    ("cordys_exported_at", "TEXT"),
     ("sold_price", "REAL"),
     ("sold_platform", "TEXT DEFAULT ''"),
     ("sold_at", "TEXT"),
