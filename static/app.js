@@ -881,6 +881,10 @@ async function renderDetails(id) {
 }
 
 function paintDetails(id, rec, aiInfo, matches) {
+  // Nobody has answered the condition questions yet (older records): start from "one owner, like new".
+  const ungraded = !rec.media_scratches && !rec.media_play && !rec.cover_creases
+    && (rec.condition_media || "VG+") === "VG+" && (rec.condition_sleeve || "VG+") === "VG+";
+  if (ungraded) rec = { ...rec, media_scratches: "none", media_play: "perfect", cover_creases: "none", condition_media: "NM", condition_sleeve: "NM" };
   const field = (key, label, hint = "") => `
     <div class="field"><label for="f_${key}">${label}</label>
       <input type="text" id="f_${key}" name="${key}" value="${esc(rec[key])}">
@@ -933,6 +937,7 @@ function paintDetails(id, rec, aiInfo, matches) {
             <button type="button" class="btn btn-small" id="discPlus" aria-label="More">+</button>
           </div>
           <span class="hint">A double album has 2. Take a photo of each disc's labels on the photos step.</span></div>
+        <p class="cond-note">✨ Condition starts as <b>like new</b>: no scratches, plays perfectly, no creases. Only tap below if this one is worn.</p>
         <div class="cond-block"><h3>💿 The RECORD (the vinyl itself)</h3>
           ${choiceGroup("media_scratches", "Is it scratched?", [["none", "Not at all", "Looks clean"], ["light", "A little", "Hairline marks"], ["some", "Some", "Visible scratches"], ["deep", "Badly", "You can feel them"]])}
           ${choiceGroup("media_play", "How does it play?", [["perfect", "Perfectly", "Silent"], ["crackle", "Slight crackle", "A little noise"], ["noisy", "Noisy", "Clicks and pops"], ["skips", "Skips", "Jumps or repeats"]])}
@@ -1364,6 +1369,10 @@ async function renderRecord(id) {
           <button class="btn btn-chrome" id="reprice">🔄 Check price again</button>
         </div>
         <div id="helper"></div>
+        <div id="dupeNote"></div>
+        <details class="more"><summary>Entered this record twice?</summary>
+          <p class="muted">If the same record is in the library twice, merge the two entries into one. Nothing is lost.</p>
+          <button class="btn btn-chrome btn-small" id="merge">🔗 Merge with another entry</button></details>
         <details class="more"><summary>Remove this record</summary>
           <button class="btn btn-red btn-small" id="delete">🗑 Delete this record</button></details>
       </div>
@@ -1390,6 +1399,16 @@ async function renderRecord(id) {
       await api(`/api/records/${id}/unsold`, { method: "POST" }); route();
     }
   });
+  $("#merge").addEventListener("click", () => mergeDialog(rec));
+  api("/api/records").then((d) => {
+    const twins = d.records.filter((o) => o.id !== rec.id && sameAlbum(o, rec));
+    const el = $("#dupeNote");
+    if (!el || !twins.length) return;
+    el.innerHTML = `<div class="ai-box warn"><span class="icon">👯</span><div><b>This record looks like it's in the library ${twins.length === 1 ? "twice" : `${twins.length + 1} times`}.</b><br>
+      If it's the same record entered again, merge them. If you really own two copies, leave them be.<br>
+      <button class="btn btn-small" id="mergeTwin" style="margin-top:10px">🔗 Merge them into one</button></div></div>`;
+    $("#mergeTwin").addEventListener("click", () => mergeDialog(rec, d.records));
+  }).catch(() => {});
   $("#delete").addEventListener("click", async () => {
     if (await confirmBox("Delete this record and its photos for good?", "Yes, delete it", true)) {
       await api(`/api/records/${id}`, { method: "DELETE" });
@@ -1397,6 +1416,55 @@ async function renderRecord(id) {
       location.hash = "#/";
     }
   });
+}
+
+// Same artist and album, ignoring capitals, punctuation and a leading "The".
+function albumKey(r) {
+  const clean = (t) => (t || "").toLowerCase().replace(/^(the|a|an)\s+/, "").replace(/[^a-z0-9]+/g, "");
+  return clean(r.artist) && clean(r.album_title) ? `${clean(r.artist)}|${clean(r.album_title)}` : "";
+}
+function sameAlbum(a, b) { return albumKey(a) !== "" && albumKey(a) === albumKey(b); }
+
+async function mergeDialog(rec, all = null) {
+  const others = (all || (await api("/api/records")).records).filter((o) => o.id !== rec.id);
+  others.sort((a, b) => (sameAlbum(b, rec) - sameAlbum(a, rec)) || sortKey(a).localeCompare(sortKey(b)));
+  const rowHTML = (o) => `
+    <label class="cordys-row" data-find="${esc(`${o.artist} ${o.album_title}`.toLowerCase())}">
+      <input type="radio" name="mergeWith" value="${o.id}">
+      <span class="cordys-thumb">${o.images.front ? `<img src="${esc(o.images.front)}" alt="" loading="lazy">` : ""}</span>
+      <span><b>${esc(o.artist || "Unknown artist")}</b> · <i>${esc(o.album_title || "Untitled")}</i>
+        ${sameAlbum(o, rec) ? `<span class="badge for_sale">Same album</span>` : ""}<br>
+        <span class="muted">${[o.year_pressed, o.catalog_number, o.suggested_price ? money(o.suggested_price) : "", STATE_LABEL[o.state]].filter(Boolean).map(esc).join(" · ")}</span></span>
+    </label>`;
+  const box = openModal(`
+    <h2>🔗 Merge another entry into this one</h2>
+    <p>You're keeping <b>${esc(rec.artist || "Unknown artist")} · ${esc(rec.album_title || "Untitled")}</b>. Its details and photos stay as they are.
+      Anything it's missing is copied from the entry you pick, and then that other entry is removed.</p>
+    <input type="text" id="mergeFind" placeholder="🔍  Find the other entry…" style="margin-bottom:10px">
+    <div class="cordys-list" style="max-height:340px">${others.length ? others.map(rowHTML).join("") : `<p class="muted" style="padding:12px">There are no other records to merge with.</p>`}</div>
+    <label class="check-big" style="margin-top:14px;font-size:1rem"><input type="checkbox" id="mergePhotos" checked> Keep the other entry's photos too, as extra photos</label>
+    <div class="row">
+      <button class="btn btn-green" id="mergeGo" disabled>🔗 Merge them</button>
+      <button class="btn btn-ghost" id="mergeNo">Cancel</button>
+    </div>`);
+  $("#mergeNo", box).onclick = closeModal;
+  $("#mergeFind", box).addEventListener("input", (e) => {
+    const q = e.target.value.trim().toLowerCase();
+    $$(".cordys-row", box).forEach((r) => r.classList.toggle("hidden", !!q && !r.dataset.find.includes(q)));
+  });
+  $$("input[name=mergeWith]", box).forEach((r) => r.addEventListener("change", () => { $("#mergeGo", box).disabled = false; }));
+  $("#mergeGo", box).onclick = async () => {
+    const picked = $("input[name=mergeWith]:checked", box);
+    if (!picked) return;
+    const btn = $("#mergeGo", box);
+    btn.disabled = true; btn.textContent = "Merging…";
+    try {
+      await api(`/api/records/${rec.id}/merge`, { method: "POST", body: { other_id: Number(picked.value), keep_photos: $("#mergePhotos", box).checked } });
+      closeModal();
+      toast("Merged into one record.");
+      route();
+    } catch (e) { toast(e.message, true); btn.disabled = false; btn.textContent = "🔗 Merge them"; }
+  };
 }
 
 function soldDialog(rec, platforms) {

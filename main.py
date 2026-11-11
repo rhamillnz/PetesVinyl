@@ -127,6 +127,11 @@ class SoldRequest(BaseModel):
     platform: str = ""
 
 
+class MergeRequest(BaseModel):
+    other_id: int
+    keep_photos: bool = True   # keep the other entry's spare photos as extras instead of deleting them
+
+
 class DiscogsMatch(BaseModel):
     release_id: str
     overwrite: bool = False   # picked from a typed search: trust Discogs over what the AI read
@@ -147,6 +152,8 @@ def _require(record_id: int) -> dict[str, Any]:
     return rec
 
 
+PERFECT = {"condition_media": "NM", "condition_sleeve": "NM",
+           "media_scratches": "none", "media_play": "perfect", "cover_creases": "none"}
 EXTRA_KEY = re.compile(r"^extra_\d{1,3}$")
 
 
@@ -240,6 +247,9 @@ def create_record(body: RecordIn) -> dict[str, Any]:
     fields = body.model_dump(exclude={"images", "extra_labels"}, exclude_none=True)
     fields.setdefault("is_first_owner", True)
     fields.setdefault("number_of_owners", 1)
+    # Nearly all of Pete's records are one-owner and like new, so start there; he only changes the odd worn one.
+    for key, value in PERFECT.items():
+        fields.setdefault(key, value)
     record_id = db.create_record(fields)
     if body.images:
         db.update_record(record_id, _save_images(record_id, body.images, body.extra_labels))
@@ -270,6 +280,87 @@ def delete_record(record_id: int) -> dict[str, Any]:
     db.delete_record(record_id)
     mark_changed()
     return {"ok": True}
+
+
+# Details copied from the other entry only where this one has nothing.
+MERGE_FILL = ["artist", "album_title", "year_pressed", "original_year", "pressing_location", "label", "catalog_number",
+              "barcode", "matrix_numbers", "ai_summary", "discogs_release_id", "discogs_url", "discogs_median",
+              "ebay_sold_average", "popsike_median", "ai_estimate", "estimated_value", "suggested_price",
+              "valuation_notes", "valued_at", "cordys_exported_at"]
+SLOT_WORDS = {"front": "Front cover", "back": "Back cover", "disc_a": "Side A label", "disc_b": "Side B label"}
+
+
+@app.post("/api/records/{record_id}/merge")
+def merge_records(record_id: int, body: MergeRequest) -> dict[str, Any]:
+    """Two entries for the same record: fold the other one into this one, then remove the other.
+
+    This entry's own details and photos always win. Anything it is missing (details, price, photos, where it's
+    listed, a sale) comes across from the other. A safety copy of the library is made first.
+    """
+    if body.other_id == record_id:
+        raise HTTPException(400, "Pick a different record to merge with.")
+    keep, other = _require(record_id), _require(body.other_id)
+    library.safety_copy("before merging records")
+    updates: dict[str, Any] = {k: other[k] for k in MERGE_FILL if not keep.get(k) and other.get(k)}
+    if other.get("notes") and other["notes"].strip() not in (keep.get("notes") or ""):
+        updates["notes"] = "\n".join(filter(None, [(keep.get("notes") or "").strip(), other["notes"].strip()]))
+    if (other.get("disc_count") or 1) > (keep.get("disc_count") or 1):
+        updates["disc_count"] = other["disc_count"]
+    links = dict(keep.get("listing_links") or {})
+    for site in PLATFORMS:
+        if keep.get(f"{site}_status") in (None, "", "not_listed") and other.get(f"{site}_status") not in (None, "", "not_listed"):
+            updates[f"{site}_status"] = other[f"{site}_status"]
+            if (other.get("listing_links") or {}).get(site):
+                links[site] = other["listing_links"][site]
+    updates["listing_links"] = links
+    if other.get("sold_at") and not keep.get("sold_at"):
+        updates.update({k: other.get(k) for k in ("sold_price", "sold_platform", "sold_at")})
+
+    folder = IMAGES_DIR / f"record_{record_id}"
+    folder.mkdir(parents=True, exist_ok=True)
+    extras = [dict(e) for e in keep.get("extra_images") or []]
+    seq = max([int(e["key"].split("_")[1]) for e in extras if EXTRA_KEY.match(e.get("key") or "")] or [0])
+
+    def bring(path: str, name: str) -> str:
+        """Move one photo file into this record's folder. Returns its new path, or '' if the file has gone."""
+        src = IMAGES_DIR / path
+        if not path or not src.is_file():
+            return ""
+        rel = f"record_{record_id}/{name}_{int(time.time() * 1000)}{src.suffix or '.jpg'}"
+        src.replace(IMAGES_DIR / rel)
+        return rel
+
+    def spare(path: str, label: str) -> None:
+        nonlocal seq
+        if not body.keep_photos:
+            (IMAGES_DIR / path).unlink(missing_ok=True)
+            return
+        rel = bring(path, f"extra_{seq + 1}")
+        if rel:
+            seq += 1
+            extras.append({"key": f"extra_{seq}", "path": rel, "label": label[:80]})
+
+    for slot, col in IMAGE_SLOTS.items():
+        if not other.get(col):
+            continue
+        if keep.get(col):
+            spare(other[col], f"{SLOT_WORDS[slot]} (other copy)")
+        else:
+            rel = bring(other[col], slot)
+            if rel:
+                updates[col] = rel
+    for extra in other.get("extra_images") or []:
+        if extra.get("path"):
+            spare(extra["path"], extra.get("label") or "Extra photo")
+    updates["extra_images"] = extras
+    db.update_record(record_id, updates)
+    db.delete_record(body.other_id)
+    try:
+        (IMAGES_DIR / f"record_{body.other_id}").rmdir()   # only goes if it is empty
+    except OSError:
+        pass
+    mark_changed()
+    return _require(record_id)
 
 
 @app.delete("/api/records/{record_id}/extra/{key}")

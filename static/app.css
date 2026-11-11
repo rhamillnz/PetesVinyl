@@ -582,3 +582,5 @@ body {
 
 /* ---------- the Discogs pressing that's been picked ---------- */
 .picked { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; background: rgba(54, 184, 92, .15); border: 3px solid var(--green); border-radius: 16px; padding: 12px 16px; margin-bottom: 14px; }
+
+.cond-note { background: rgba(54, 184, 92, .15); border: 3px solid var(--green); border-radius: 16px; padding: 12px 16px; margin: 0 0 18px; }
