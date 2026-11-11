@@ -26,7 +26,10 @@ from .config import IMAGES_DIR
 log = logging.getLogger("petesvinyl.cordys")
 
 EXPORT_DIR = config.DATA_DIR / "Cordys exports"
-STYLES = {"sheet": "Spreadsheet and photos", "folders": "One folder per record", "pdf": "PDF catalogue"}
+STYLES = {"template": "Cordys template", "sheet": "Spreadsheet and photos", "folders": "One folder per record",
+          "pdf": "PDF catalogue"}
+SQUARE_PHOTO = 1600              # Cordy's want square photos: the picture is centred on a white square this many pixels wide
+SQUARE_LIMIT = 1000 * 1024       # ...and each one under 1 MB
 EMAIL_LIMIT = 20 * 1024 * 1024   # most email services refuse attachments much bigger than this
 SMALL_PHOTO = (1600, 82)         # longest side in pixels, JPEG quality: sharp on screen, a few hundred KB each
 PDF_PHOTO = (1000, 72)
@@ -286,7 +289,127 @@ def write_pdf(recs: list[dict[str, Any]], path: Path, small: bool, prices: bool)
     return photos
 
 
-WRITERS = {"sheet": (write_sheet_zip, "zip"), "folders": (write_folders_zip, "zip"), "pdf": (write_pdf, "pdf")}
+# --------------------------------------------------------------------------- Cordy's own template
+# What Cordy's asked for (Gemma Sheils, November 2026): their three-column spreadsheet (ITEMNUMBER, HEADING, DESCRIPTION),
+# lots numbered from 1, and square photos named after the lot number: 1.jpg, then 1-1.jpg, 1-2.jpg for more of the same lot.
+def tidy(text: Any) -> str:
+    """Drop notes that only mean something to us: Discogs' "(2)" after a label name, "(tentative)", "(plant not confirmed)"."""
+    text = re.sub(r"\s*\((?:\d+|[^)]*(?:tentative|not confirmed|unknown|unconfirmed)[^)]*)\)", "", str(text or ""), flags=re.I)
+    return re.sub(r"\s+", " ", text).strip().rstrip("*").strip()   # a trailing * was the AI's "not sure" mark
+
+
+def template_heading(rec: dict[str, Any]) -> str:
+    return f"{(rec.get('artist') or 'Unknown artist').upper()}, {(rec.get('album_title') or 'Untitled').upper()}"
+
+
+def template_description(rec: dict[str, Any]) -> str:
+    """Laid out like the example in their template, then the extras they said were welcome."""
+    lines = [f"{rec.get('artist') or 'Unknown artist'} '{rec.get('album_title') or 'Untitled'}',", ""]
+    facts = [("Released", rec.get("year_pressed") or rec.get("original_year")),
+             ("Label", tidy(rec.get("label"))),
+             ("Catalog #", tidy(rec.get("catalog_number"))),
+             ("Release ID", rec.get("discogs_release_id")),
+             ("Format", format_name(rec) if int(rec.get("disc_count") or 1) > 1 else ""),
+             ("Pressed in", tidy(rec.get("pressing_location")))]
+    lines += [f"{label}: {value}" for label, value in facts if value]
+    media = listings.CONDITION_WORDS.get(rec.get("condition_media") or "VG+", rec.get("condition_media") or "")
+    cover = listings.COVER_GRADE_WORDS.get(rec.get("condition_sleeve") or "VG+", rec.get("condition_sleeve") or "")
+    lines += [f"Record condition: {media}", f"Cover condition: {cover}", owner_line(rec)]
+    if rec.get("notes"):
+        lines.append(str(rec["notes"]).strip())
+    return "\n".join(lines)
+
+
+def square_photo(src: Path, dest: Path) -> None:
+    """Centre the photo on a white square (nothing is cropped off), and keep it under Cordy's 1 MB limit."""
+    from PIL import Image, ImageOps
+    with Image.open(src) as img:
+        pic = ImageOps.exif_transpose(img).convert("RGB")
+    pic.thumbnail((SQUARE_PHOTO, SQUARE_PHOTO), Image.Resampling.LANCZOS)
+    canvas = Image.new("RGB", (SQUARE_PHOTO, SQUARE_PHOTO), "white")
+    canvas.paste(pic, ((SQUARE_PHOTO - pic.width) // 2, (SQUARE_PHOTO - pic.height) // 2))
+    for quality in (88, 82, 76, 70, 62, 54):
+        canvas.save(dest, "JPEG", quality=quality, optimize=True)
+        if dest.stat().st_size <= SQUARE_LIMIT:
+            return
+
+
+def _xml(text: Any) -> str:
+    return html.escape(re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", str(text)), quote=False)
+
+
+def xlsx(rows: list[list[Any]], widths: list[float]) -> bytes:
+    """A small, real Excel file: one sheet, bold first row, text wrapped so the lines inside a cell show.
+    Written by hand so nothing extra has to be installed on Pete's PC."""
+    def cell(col: int, row: int, value: Any, style: int) -> str:
+        ref_ = f"{chr(65 + col)}{row}"
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return f'<c r="{ref_}" s="{style}"><v>{value}</v></c>'
+        return f'<c r="{ref_}" s="{style}" t="inlineStr"><is><t xml:space="preserve">{_xml(value)}</t></is></c>'
+    body = "".join(f'<row r="{r}">' + "".join(cell(c, r, v, 1 if r == 1 else 2) for c, v in enumerate(row)) + "</row>"
+                   for r, row in enumerate(rows, 1))
+    cols = "".join(f'<col min="{i}" max="{i}" width="{w}" customWidth="1"/>' for i, w in enumerate(widths, 1))
+    ns = 'xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
+    parts = {
+        "[Content_Types].xml": '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+            '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+            '<Default Extension="xml" ContentType="application/xml"/>'
+            '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+            '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+            '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>',
+        "_rels/.rels": '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>',
+        "xl/workbook.xml": f'<workbook {ns} xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+            '<sheets><sheet name="Records" sheetId="1" r:id="rId1"/></sheets></workbook>',
+        "xl/_rels/workbook.xml.rels": '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
+            '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>',
+        "xl/styles.xml": f'<styleSheet {ns}><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font>'
+            '<font><b/><sz val="11"/><name val="Calibri"/></font></fonts>'
+            '<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>'
+            '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
+            '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+            '<cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
+            '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>'
+            '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>'
+            '</cellXfs></styleSheet>',
+        "xl/worksheets/sheet1.xml": f'<worksheet {ns}><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" '
+            f'activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols>{cols}</cols><sheetData>{body}</sheetData></worksheet>',
+    }
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        for name, text in parts.items():
+            z.writestr(name, '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' + text)
+    return out.getvalue()
+
+
+def write_template_zip(recs: list[dict[str, Any]], path: Path, small: bool, prices: bool) -> int:
+    """Their spreadsheet plus square photos. Lot numbers run 1, 2, 3... in the order shown (A to Z by artist)."""
+    photos = 0
+    head = ["ITEMNUMBER", "HEADING", "DESCRIPTION", "REFERENCE"]
+    if prices:
+        head.append(f"SELLER'S PRICE GUIDE ({config.get('HOME_CURRENCY')})")
+    rows: list[list[Any]] = [head]
+    with tempfile.TemporaryDirectory() as tmp, zipfile.ZipFile(path, "w", zipfile.ZIP_STORED) as z:
+        for lot, rec in enumerate(recs, 1):
+            row: list[Any] = [lot, template_heading(rec), template_description(rec), ref(rec)]
+            if prices:
+                price = rec.get("suggested_price") or ""
+                row.append(int(price) if isinstance(price, float) and price.is_integer() else price)
+            rows.append(row)
+            # a spare front cover left over from merging two entries is the same picture twice, so it stays at home
+            wanted = [src for label, src in photo_list(rec) if "(other copy)" not in label]
+            for n, src in enumerate(wanted):
+                done = Path(tmp) / "square.jpg"
+                square_photo(src, done)
+                z.write(done, f"photos/{lot}.jpg" if n == 0 else f"photos/{lot}-{n}.jpg")
+                photos += 1
+        widths = [13, 44, 62, 13] + ([24] if prices else [])
+        z.writestr("Cordys record auction.xlsx", xlsx(rows, widths))
+    return photos
+
+
+WRITERS = {"template": (write_template_zip, "zip"), "sheet": (write_sheet_zip, "zip"), "folders": (write_folders_zip, "zip"), "pdf": (write_pdf, "pdf")}
 
 
 # --------------------------------------------------------------------------- putting it together
@@ -326,7 +449,10 @@ def build(record_ids: list[int], style: str, small: bool = True, prices: bool = 
     size = final.stat().st_size
     return {"ok": True, "file": final.name, "folder": str(EXPORT_DIR), "records": len(recs), "photos": photos,
             "size": size, "fits_email": size <= EMAIL_LIMIT, "warnings": _warnings(recs),
-            "record_ids": [r["id"] for r in recs]}
+            "record_ids": [r["id"] for r in recs],
+            # which lot number each record was given (only the template style numbers them)
+            "lots": [{"lot": n, "ref": ref(r), "name": f"{r.get('artist') or 'Unknown artist'} - {r.get('album_title') or 'Untitled'}"}
+                     for n, r in enumerate(recs, 1)] if style == "template" else []}
 
 
 def export_path(name: str) -> Path | None:

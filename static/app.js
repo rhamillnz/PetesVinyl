@@ -416,11 +416,12 @@ function cardHTML(r, code = "") {
 
 // ------------------------------------------------------------------ Cordy's auction export
 const CORDYS_STYLES = [
+  ["template", "⭐ Cordy's own template (what they asked for)", "One zip file: their spreadsheet (item number, heading, description) with the records numbered 1, 2, 3… and square photos named to match: 1.jpg, then 1-1.jpg, 1-2.jpg for extra photos of the same record."],
   ["sheet", "📊 Spreadsheet and photos", "One zip file: a spreadsheet with a row for each record, and all the photos numbered to match. Best if Cordy's want to load everything into their own system."],
   ["folders", "📁 One folder per record", "One zip file with a folder for each record, holding its photos and a description. Best if they enter each record by hand."],
   ["pdf", "📖 PDF catalogue", "One file with a page for each record, showing its photos and details. Easy to read, print or email."],
 ];
-const cordysChoice = { ids: new Set(), style: "sheet", small: true, prices: false };
+const cordysChoice = { ids: new Set(), style: "template", small: true, prices: false };
 
 function fileSize(bytes) {
   return bytes < 1048576 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1048576).toFixed(1)} MB`;
@@ -468,7 +469,7 @@ async function renderCordys() {
         <span><b>${name}</b><br>${about}</span></label>`).join("")}
       <h2>3. Extras</h2>
       <label class="cordys-style" id="cordysSmallRow"><input type="checkbox" id="cordysSmall" ${cordysChoice.small ? "checked" : ""}>
-        <span><b>Make the photos smaller</b><br>Easier to email. Untick to send the full-size photos. (The PDF always uses smaller photos.)</span></label>
+        <span><b>Make the photos smaller</b><br>Easier to email. Untick to send the full-size photos. (The PDF and Cordy's own template always use smaller photos; the template's are square and under 1 MB each.)</span></label>
       <label class="cordys-style"><input type="checkbox" id="cordysPrices" ${cordysChoice.prices ? "checked" : ""}>
         <span><b>Include my suggested prices</b><br>Left off to begin with, because Cordy's set their own estimates with you.</span></label>
       <p style="margin-top:20px"><button class="btn btn-green btn-block" id="cordysGo">🎁 Wrap them up</button></p>
@@ -497,8 +498,9 @@ async function renderCordys() {
       unpriced.length ? `<div class="ai-box warn" style="margin-top:14px"><span class="icon">❓</span><div><b>${unpriced.length} ticked record${unpriced.length === 1 ? " has" : "s have"} no price yet</b>, so I can't tell whether ${unpriced.length === 1 ? "it's" : "they're"} rare. Check the price first if you're not sure.</div></div>` : "",
     ].join("");
     if ($("#cordysDropRare")) $("#cordysDropRare").addEventListener("click", () => setOnly((r) => cordysChoice.ids.has(r.id) && !isRare(r)));
-    $("#cordysSmallRow").style.opacity = cordysChoice.style === "pdf" ? ".5" : "1";
-    $("#cordysSmall").disabled = cordysChoice.style === "pdf";
+    const fixedSize = cordysChoice.style === "pdf" || cordysChoice.style === "template";
+    $("#cordysSmallRow").style.opacity = fixedSize ? ".5" : "1";
+    $("#cordysSmall").disabled = fixedSize;
   };
   const setOnly = (want) => {
     cordysChoice.ids = new Set(records.filter(want).map((r) => r.id));
