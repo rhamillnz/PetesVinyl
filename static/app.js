@@ -996,6 +996,7 @@ function paintDetails(id, rec, aiInfo, matches) {
         </details>
         <button class="btn btn-huge btn-block btn-green" type="submit">Looks right - check the price ➜</button>
         <div class="row" style="margin-top:14px;justify-content:center">
+          <button class="btn btn-small" type="button" id="saveNextRec">💾 Save it and add the next record</button>
           <button class="btn btn-ghost btn-small" type="button" id="justSave">Just save it to my collection</button>
         </div>
       </form>
@@ -1092,6 +1093,11 @@ function paintDetails(id, rec, aiInfo, matches) {
     await saveDetails(id, owners);
     flags.value.add(id);
     location.hash = `#/record/${id}/price`;
+  });
+  $("#saveNextRec").addEventListener("click", async () => {
+    await saveDetails(id, owners);
+    toast("Saved to your collection. Ready for the next record.");
+    location.hash = "#/add";
   });
   $("#justSave").addEventListener("click", async () => {
     await saveDetails(id, owners);
@@ -1214,6 +1220,7 @@ async function renderPrice(id) {
         <button class="btn btn-chrome" id="again">🔄 Check the price again</button>
         <a class="btn btn-chrome" href="#/record/${id}/details">🔍 Wrong or no Discogs price? Pick the pressing</a>
         <span class="spacer"></span>
+        <button class="btn" id="keepNext">💾 Keep it and add the next record</button>
         <button class="btn btn-ghost" id="keep">Keep it in my collection</button>
       </div>
     </div>`;
@@ -1250,6 +1257,7 @@ async function renderPrice(id) {
     if (!Number($("#priceInput").value)) { toast("Please type a price first.", true); return; }
     location.hash = `#/record/${id}/sell`;
   });
+  $("#keepNext").addEventListener("click", async () => { await savePrice(); toast("Saved to your collection. Ready for the next record."); location.hash = "#/add"; });
   $("#keep").addEventListener("click", async () => { await savePrice(); toast("Saved to your collection."); location.hash = `#/record/${id}`; });
 }
 
@@ -1400,7 +1408,8 @@ async function renderSell(id) {
       const res = await api("/api/syndicate", { method: "POST", body: { record_id: id, platforms: [...chosen] } });
       $("#helper").innerHTML = `<h2 style="margin-top:10px">Your listings</h2>` +
         Object.values(res.results).map((r) => helperCardHTML(r.listing, r)).join("") +
-        `<a class="btn btn-huge btn-block" href="#/record/${id}">All done ✓</a>`;
+        `<div class="row"><a class="btn btn-huge" style="flex:1" href="#/add">➕ All done, add the next record</a>
+          <a class="btn btn-chrome" href="#/record/${id}">All done, show me this record</a></div>`;
       bindHelpers(id);
       $("#helper").scrollIntoView({ behavior: "smooth" });
     } catch (e) {
@@ -1501,7 +1510,8 @@ async function renderRecord(id) {
   const active = platforms.filter((p) => rec[`${p.id}_status`] !== "not_listed");
 
   app.innerHTML = `
-    <div class="row" style="margin-bottom:18px"><a class="btn btn-chrome btn-small" href="#/">⬅ Back to all my records</a></div>
+    <div class="row" style="margin-bottom:18px"><a class="btn btn-chrome btn-small" href="#/">⬅ Back to all my records</a>
+      <span class="spacer"></span><a class="btn" href="#/add">➕ Add the next record</a></div>
     <div class="grid-2">
       <div class="panel">
         <div class="photos-big">${SLOTS.map((s) => rec.images[s.key]
