@@ -338,7 +338,7 @@ def _xml(text: Any) -> str:
     return html.escape(re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", str(text)), quote=False)
 
 
-def xlsx(rows: list[list[Any]], widths: list[float]) -> bytes:
+def xlsx(rows: list[list[Any]], widths: list[float], sheet: str = "Records") -> bytes:
     """A small, real Excel file: one sheet, bold first row, text wrapped so the lines inside a cell show.
     Written by hand so nothing extra has to be installed on Pete's PC."""
     def cell(col: int, row: int, value: Any, style: int) -> str:
@@ -360,7 +360,7 @@ def xlsx(rows: list[list[Any]], widths: list[float]) -> bytes:
         "_rels/.rels": '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
             '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>',
         "xl/workbook.xml": f'<workbook {ns} xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
-            '<sheets><sheet name="Records" sheetId="1" r:id="rId1"/></sheets></workbook>',
+            f'<sheets><sheet name="{html.escape(sheet)}" sheetId="1" r:id="rId1"/></sheets></workbook>',
         "xl/_rels/workbook.xml.rels": '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
             '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
             '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>',
@@ -386,13 +386,14 @@ def xlsx(rows: list[list[Any]], widths: list[float]) -> bytes:
 def write_template_zip(recs: list[dict[str, Any]], path: Path, small: bool, prices: bool) -> int:
     """Their spreadsheet plus square photos. Lot numbers run 1, 2, 3... in the order shown (A to Z by artist)."""
     photos = 0
-    head = ["ITEMNUMBER", "HEADING", "DESCRIPTION", "REFERENCE"]
+    # Column names, their order, the widths and the sheet name are copied from Cordy's RECORD AUCTION TEMPLATE.xlsx.
+    head = ["ITEMNUMBER", "YOUR REF", "HEADING", "DESCRIPTION"]
     if prices:
         head.append(f"SELLER'S PRICE GUIDE ({config.get('HOME_CURRENCY')})")
     rows: list[list[Any]] = [head]
     with tempfile.TemporaryDirectory() as tmp, zipfile.ZipFile(path, "w", zipfile.ZIP_STORED) as z:
         for lot, rec in enumerate(recs, 1):
-            row: list[Any] = [lot, template_heading(rec), template_description(rec), ref(rec)]
+            row: list[Any] = [lot, ref(rec), template_heading(rec), template_description(rec)]
             if prices:
                 price = rec.get("suggested_price") or ""
                 row.append(int(price) if isinstance(price, float) and price.is_integer() else price)
@@ -404,8 +405,8 @@ def write_template_zip(recs: list[dict[str, Any]], path: Path, small: bool, pric
                 square_photo(src, done)
                 z.write(done, f"photos/{lot}.jpg" if n == 0 else f"photos/{lot}-{n}.jpg")
                 photos += 1
-        widths = [13, 44, 62, 13] + ([24] if prices else [])
-        z.writestr("Cordys record auction.xlsx", xlsx(rows, widths))
+        widths = [13.3, 13.3, 44, 113] + ([24] if prices else [])
+        z.writestr("Cordys record auction.xlsx", xlsx(rows, widths, "Lots Template"))
     return photos
 
 
