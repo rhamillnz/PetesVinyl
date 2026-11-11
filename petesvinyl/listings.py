@@ -47,6 +47,17 @@ PLATFORMS: dict[str, dict[str, Any]] = {
         "title_max": 65,
         "api": False,
     },
+    # An auction house, not a website Pete lists on himself: records are marked as being there from the
+    # Cordy's export page. It is never in ENABLED_PLATFORMS, so it doesn't appear on the Sell step.
+    "cordys": {
+        "name": "Cordy's Auction",
+        "where": "Auction house in Auckland",
+        "currency": "NZD",
+        "sell_url": "https://www.cordys.co.nz/",
+        "title_max": 120,
+        "api": False,
+        "auction": True,
+    },
 }
 
 CONDITION_WORDS = {

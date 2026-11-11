@@ -265,10 +265,12 @@ async function renderHome() {
   const counts = { "": all.length, collection: 0, ready: 0, for_sale: 0, sold: 0 };
   all.forEach((r) => { counts[r.state] += 1; });
   counts.collection += counts.ready;
-  const inState = all.filter((r) => !home.state || r.state === home.state || (home.state === "collection" && r.state === "ready"));
+  const atCordys = (r) => r.cordys_status === "listed" && r.state !== "sold";
+  counts.cordys = all.filter(atCordys).length;
+  const inState = all.filter((r) => !home.state || (home.state === "cordys" ? atCordys(r) : r.state === home.state || (home.state === "collection" && r.state === "ready")));
   const shown = inState.filter((r) => inBand(r, home.band));
   const bands = [["", "Any price"], ["under", `Under $${RARE_FROM}`], ["rare", `⭐ Rare: $${RARE_FROM} and over`], ["none", "No price yet"]];
-  const tabs = [["", "All"], ["collection", "In my collection"], ["for_sale", "For sale"], ["sold", "Sold"]];
+  const tabs = [["", "All"], ["collection", "In my collection"], ["for_sale", "For sale"], ["cordys", "🔨 At Cordy's"], ["sold", "Sold"]];
 
   app.innerHTML = `
     <div class="home-bar">
@@ -389,8 +391,9 @@ async function renderCordys() {
   cordysChoice.ids = new Set([...cordysChoice.ids].filter((id) => known.has(id)));
 
   const rowHTML = (r) => {
-    const listed = (platformsCache || []).filter((p) => r[`${p.id}_status`] === "listed").map((p) => p.name);
-    const notes = [r.suggested_price ? money(r.suggested_price) : "No price yet",
+    const listed = (platformsCache || []).filter((p) => p.id !== "cordys" && r[`${p.id}_status`] === "listed").map((p) => p.name);
+    const notes = [r.cordys_status === "listed" ? `<span class="badge for_sale">🔨 For sale at Cordy's</span>` : "",
+      r.suggested_price ? money(r.suggested_price) : "No price yet",
       isRare(r) ? `<span class="badge ready">⭐ Rare: better on a specialist site</span>` : "",
       r.cordys_exported_at ? `Exported ${esc(ago(r.cordys_exported_at))}` : "",
       listed.length ? `For sale on ${esc(listed.join(", "))}` : ""].filter(Boolean).join(" · ");
@@ -409,6 +412,7 @@ async function renderCordys() {
       <h2>1. Tick the records</h2>
       ${records.length ? `<div class="row" style="margin-bottom:12px">
         <button class="btn btn-small" id="cordysUnder">Tick all under $${RARE_FROM}</button>
+        <button class="btn btn-chrome btn-small" id="cordysSent">Tick the ones I've wrapped up</button>
         <button class="btn btn-chrome btn-small" id="cordysAll">Tick all</button>
         <button class="btn btn-chrome btn-small" id="cordysNone">Untick all</button>
         <b id="cordysCount"></b></div>
@@ -425,6 +429,13 @@ async function renderCordys() {
         <span><b>Include my suggested prices</b><br>Left off to begin with, because Cordy's set their own estimates with you.</span></label>
       <p style="margin-top:20px"><button class="btn btn-green btn-block" id="cordysGo">🎁 Wrap them up</button></p>
       <div id="cordysResult"></div>
+      <h2 style="margin-top:28px">4. Once Cordy's have them</h2>
+      <p>When the records have gone to Cordy's, tick them above and mark them, so the app shows them as <b>for sale at Cordy's</b>.
+        When one sells, open it and press <b>It sold!</b> as usual.</p>
+      <div class="row">
+        <button class="btn" id="cordysMark">🔨 Mark the ticked records as for sale at Cordy's</button>
+        <button class="btn btn-ghost btn-small" id="cordysUnmark">↩ Take the ticked records back off Cordy's</button>
+      </div>
     </div>`;
 
   const paint = () => {
@@ -432,6 +443,7 @@ async function renderCordys() {
     const count = $("#cordysCount");
     if (count) count.textContent = `${n} of ${records.length} ticked`;
     $("#cordysGo").disabled = !n;
+    $("#cordysMark").disabled = !n; $("#cordysUnmark").disabled = !n;
     const rare = records.filter((r) => cordysChoice.ids.has(r.id) && isRare(r));
     const unpriced = records.filter((r) => cordysChoice.ids.has(r.id) && !r.suggested_price);
     const warn = $("#cordysRare");
@@ -458,8 +470,27 @@ async function renderCordys() {
   if (records.length) {
     $("#cordysAll").addEventListener("click", () => setAll(true));
     $("#cordysUnder").addEventListener("click", () => setOnly((r) => !!r.suggested_price && !isRare(r)));
+    $("#cordysSent").addEventListener("click", () => {
+      setOnly((r) => !!r.cordys_exported_at && r.cordys_status !== "listed");
+      if (!cordysChoice.ids.size) toast("Every record you've wrapped up is already marked as at Cordy's.");
+    });
     $("#cordysNone").addEventListener("click", () => setAll(false));
   }
+  const mark = async (ids, on) => {
+    const res = await api("/api/cordys/mark", { method: "POST", body: { record_ids: ids, at_cordys: on } });
+    toast(on ? `${res.changed} record${res.changed === 1 ? " is" : "s are"} now marked as for sale at Cordy's.`
+      : `${res.changed} record${res.changed === 1 ? " is" : "s are"} no longer marked as at Cordy's.`);
+    cordysChoice.ids = new Set();
+    renderCordys();
+  };
+  $("#cordysMark").addEventListener("click", async () => {
+    const ids = [...cordysChoice.ids];
+    if (await confirmBox(`Mark ${ids.length} record${ids.length === 1 ? "" : "s"} as for sale at Cordy's?`, "Yes, mark them")) mark(ids, true);
+  });
+  $("#cordysUnmark").addEventListener("click", async () => {
+    const ids = [...cordysChoice.ids];
+    if (await confirmBox(`Take ${ids.length} record${ids.length === 1 ? "" : "s"} back off Cordy's?`, "Yes, take them off")) mark(ids, false);
+  });
   $$('input[name="cordysStyle"]').forEach((r) => r.addEventListener("change", () => { cordysChoice.style = r.value; paint(); }));
   $("#cordysSmall").addEventListener("change", (e) => { cordysChoice.small = e.target.checked; });
   $("#cordysPrices").addEventListener("change", (e) => { cordysChoice.prices = e.target.checked; });
@@ -482,7 +513,10 @@ async function renderCordys() {
         <div class="row">
           <a class="btn btn-small" href="/api/cordys/file/${encodeURIComponent(res.file)}" download>💾 Save a copy</a>
           <button class="btn btn-chrome btn-small" id="cordysFolder">📂 Show me the file</button>
-        </div></div>`;
+        </div>
+        <p style="margin-top:14px">Once you've sent it and Cordy's have the records:</p>
+        <button class="btn btn-small" id="cordysMarkThese">🔨 Mark these ${res.records} as for sale at Cordy's</button></div>`;
+      $("#cordysMarkThese").addEventListener("click", () => mark(res.record_ids, true));
       $("#cordysFolder").addEventListener("click", () => api("/api/cordys/open-folder", { method: "POST" }));
       box.scrollIntoView({ behavior: "smooth", block: "center" });
       toast("All wrapped up.");
@@ -1542,14 +1576,15 @@ async function renderRecord(id) {
           return `<li><span class="nm">${esc(p.name)}</span><span class="badge ${rec[`${p.id}_status`] === "listed" ? "for_sale" : "ready"}">${STATUS_WORDS[rec[`${p.id}_status`]]}</span>
             ${link ? `<a href="${esc(link)}" target="_blank" rel="noopener">Open ↗</a>` : ""}
             <span class="spacer"></span>
-            ${["ready", "draft", "listed"].includes(rec[`${p.id}_status`]) ? `<button class="btn btn-small btn-chrome" data-helper="${p.id}">Show listing</button>` : ""}
+            ${!p.auction && ["ready", "draft", "listed"].includes(rec[`${p.id}_status`]) ? `<button class="btn btn-small btn-chrome" data-helper="${p.id}">Show listing</button>` : ""}
             ${rec[`${p.id}_status`] === "sold" ? "" : `<button class="btn btn-small btn-ghost" data-unlist="${p.id}" title="Pressed the wrong button? This puts it back to not listed.">✕ Not listed there</button>`}</li>`;
         }).join("")}</ul>` : ""}
         <div class="action-grid">
           ${rec.state === "sold"
             ? `<button class="btn btn-chrome" id="unsold">↩ Not sold after all</button>`
             : `<button class="btn btn-red btn-huge" id="sold">💰 It sold!</button>
-               <a class="btn btn-green" href="#/record/${id}/sell">🛒 Sell it</a>`}
+               <a class="btn btn-green" href="#/record/${id}/sell">🛒 Sell it</a>
+               ${rec.cordys_status === "listed" ? "" : `<button class="btn btn-chrome" id="toCordys">🔨 It's gone to Cordy's</button>`}`}
           <a class="btn" href="#/record/${id}/details">✏️ Change details or condition</a>
           <a class="btn btn-chrome" href="#/record/${id}/price">💲 Change the price</a>
           <button class="btn btn-chrome" id="reprice">🔄 Check price again</button>
@@ -1579,6 +1614,11 @@ async function renderRecord(id) {
     route();
   }));
   $("#reprice").addEventListener("click", () => { flags.value.add(id); location.hash = `#/record/${id}/price`; });
+  if ($("#toCordys")) $("#toCordys").addEventListener("click", async () => {
+    await api("/api/cordys/mark", { method: "POST", body: { record_ids: [id], at_cordys: true } });
+    toast("Marked as for sale at Cordy's.");
+    route();
+  });
   if ($("#sold")) $("#sold").addEventListener("click", () => soldDialog(rec, platforms));
   if ($("#unsold")) $("#unsold").addEventListener("click", async () => {
     if (await confirmBox("Mark this record as NOT sold?", "Yes, it's not sold")) {

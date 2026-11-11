@@ -9,7 +9,7 @@ from typing import Any
 
 from .config import DB_PATH
 
-PLATFORMS = ["trademe", "discogs", "ebay", "facebook", "gumtree"]
+PLATFORMS = ["trademe", "discogs", "ebay", "facebook", "gumtree", "cordys"]
 IMAGE_SLOTS = {
     "front": "front_cover_path",
     "back": "back_cover_path",
@@ -61,6 +61,7 @@ COLUMNS: list[tuple[str, str]] = [
     ("ebay_status", "TEXT DEFAULT 'not_listed'"),
     ("facebook_status", "TEXT DEFAULT 'not_listed'"),
     ("gumtree_status", "TEXT DEFAULT 'not_listed'"),
+    ("cordys_status", "TEXT DEFAULT 'not_listed'"),   # 'listed' = handed to Cordy's auction house to sell
     ("listing_links", "TEXT DEFAULT '{}'"),
     ("cordys_exported_at", "TEXT"),
     ("sold_price", "REAL"),

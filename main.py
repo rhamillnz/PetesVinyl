@@ -610,6 +610,29 @@ async def cordys_export(body: CordysExport) -> dict[str, Any]:
     return result
 
 
+class CordysMark(BaseModel):
+    record_ids: list[int]
+    at_cordys: bool = True
+
+
+@app.post("/api/cordys/mark")
+def cordys_mark(body: CordysMark) -> dict[str, Any]:
+    """Mark records as for sale at Cordy's auction (or take that mark off again). Sold records are left alone."""
+    changed = 0
+    for record_id in dict.fromkeys(body.record_ids):
+        rec = db.get_record(record_id)
+        if rec is None or rec.get("sold_at"):
+            continue
+        want = "listed" if body.at_cordys else "not_listed"
+        if rec.get("cordys_status") != want:
+            db.update_record(record_id, {"cordys_status": want})
+            changed += 1
+    if changed:
+        activity.record("Cordy's", f"{changed} records marked as {'for sale at' if body.at_cordys else 'no longer at'} Cordy's", True)
+        mark_changed()
+    return {"ok": True, "changed": changed}
+
+
 @app.get("/api/cordys/file/{name}")
 def cordys_file(name: str) -> FileResponse:
     path = cordys.export_path(name)
