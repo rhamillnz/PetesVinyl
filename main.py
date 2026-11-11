@@ -91,6 +91,7 @@ class RecordFields(BaseModel):
     notes: Optional[str] = None
     discogs_release_id: Optional[str] = None
     suggested_price: Optional[float] = None
+    nz_price: Optional[float] = Field(default=None, ge=0)   # 0 clears it
 
 
 class RecordIn(RecordFields):
@@ -109,6 +110,7 @@ class ValueRequest(BaseModel):
     catalog_number: Optional[str] = None
     condition_media: Optional[str] = None
     discogs_release_id: Optional[str] = None
+    apply: bool = True   # False = work out a new price but leave the record's own price alone (the recheck page)
 
 
 class SyndicateRequest(BaseModel):
@@ -463,10 +465,22 @@ async def estimate_value(body: ValueRequest) -> dict[str, Any]:
     rec: dict[str, Any] = {}
     if body.record_id:
         rec = dict(_require(body.record_id))
-    rec.update({k: v for k, v in body.model_dump(exclude={"record_id"}).items() if v})
+    rec.update({k: v for k, v in body.model_dump(exclude={"record_id", "apply"}).items() if v})
     result = await valuation.estimate(rec)
     result["recommended_platforms"] = listings.recommend(result["suggested_price"])
-    if body.record_id:
+    result["previous_price"] = rec.get("suggested_price")
+    if body.record_id and not body.apply:
+        db.update_record(body.record_id, {
+            "discogs_median": result["discogs_median"],
+            "ebay_sold_average": result["ebay_sold_average"],
+            "popsike_median": result["popsike_median"],
+            "ai_estimate": result["ai_estimate"],
+            "estimated_value": result["estimated_value"],
+            "valuation_notes": "\n".join(result["notes"]),
+            "valued_at": db.now(),
+        })
+        mark_changed()
+    elif body.record_id:
         db.update_record(body.record_id, {
             "discogs_median": result["discogs_median"],
             "ebay_sold_average": result["ebay_sold_average"],
@@ -712,8 +726,12 @@ def price_links(record_id: int) -> dict[str, Any]:
         "ebay": f"https://www.ebay.com/sch/i.html?_nkw={q}&_sacat=176985&LH_Sold=1&LH_Complete=1",
         "popsike": popsike.search_url(rec),
     }
+    plain = quote_plus(f"{rec.get('artist') or ''} {rec.get('album_title') or ''}".strip())
+    links["trademe"] = f"https://www.trademe.co.nz/a/marketplace/music-instruments/vinyl/search?search_string={plain}"
     if rec.get("discogs_release_id"):
         links["discogs"] = f"https://www.discogs.com/release/{rec['discogs_release_id']}"
+        # every copy for sale, cheapest first: the page shows which ones are "Unavailable in New Zealand"
+        links["discogs_for_sale"] = f"https://www.discogs.com/sell/release/{rec['discogs_release_id']}?sort=price%2Casc"
     return links
 
 

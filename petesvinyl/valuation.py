@@ -90,6 +90,14 @@ async def estimate(record: dict[str, Any]) -> dict[str, Any]:
     sources: list[dict[str, Any]] = []
     notes: list[str] = []
 
+    try:
+        nz_price = float(record.get("nz_price") or 0)
+    except (TypeError, ValueError):
+        nz_price = 0.0
+    if nz_price > 0:
+        sources.append({"name": "Available in NZ", "value": nz_price, "weight": 5})
+        notes.append(f"Cheapest copy a New Zealand buyer can get (you entered this): {home} {nz_price:.0f}")
+
     discogs_value = None
     if not record.get("discogs_release_id"):
         activity.record("Valuation", "No Discogs pressing chosen for this record, so no Discogs price",
@@ -99,11 +107,19 @@ async def estimate(record: dict[str, Any]) -> dict[str, Any]:
         amount = mv.get("suggested") or mv.get("lowest")
         activity.record("Valuation", "Discogs price data", bool(amount), str(mv))
         discogs_value = await currency.convert(amount, mv.get("currency") or home, home)
-        if discogs_value:
-            what = "suggested price" if mv.get("suggested") else "cheapest copy for sale"
+        copies = f" ({mv['num_for_sale']} copies for sale)" if mv.get("num_for_sale") else ""
+        if discogs_value and mv.get("suggested"):
             sources.append({"name": "Discogs", "value": discogs_value, "weight": 3})
-            notes.append(f"Discogs {what}: {home} {discogs_value:.0f}" +
-                         (f" ({mv['num_for_sale']} copies for sale)" if mv.get("num_for_sale") else ""))
+            notes.append(f"Discogs suggested price: {home} {discogs_value:.0f}{copies}")
+        elif discogs_value and nz_price:
+            # The cheapest copy in the world often won't post to New Zealand. We know the real NZ figure, so use that.
+            notes.append(f"Discogs cheapest copy anywhere in the world: {home} {discogs_value:.0f}{copies}. "
+                         "Not counted, because you've entered what a New Zealand buyer really pays.")
+        elif discogs_value:
+            sources.append({"name": "Discogs cheapest worldwide", "value": discogs_value, "weight": 1})
+            notes.append(f"Discogs cheapest copy anywhere in the world: {home} {discogs_value:.0f}{copies}. "
+                         "Careful: the cheapest sellers often won't post to New Zealand. "
+                         "Check the copies for sale and type in the cheapest one you could really buy.")
 
     query = " ".join(filter(None, [record.get("artist"), record.get("album_title"), record.get("catalog_number")]))
     ebay_avg = None
@@ -167,6 +183,9 @@ async def estimate(record: dict[str, Any]) -> dict[str, Any]:
         notes.append("No market data found, so this is a rough guess. Add a Discogs token or OpenRouter key in Settings for real prices.")
 
     suggested = nice_price(market * 1.1)  # list a little above market to leave room for offers
+    if nz_price > 0:
+        # Never ask more than a buyer here would pay to get one posted from overseas.
+        suggested = min(suggested, float(max(1, math.floor(nz_price))))
     if ai_reason:
         notes.insert(0, ai_reason)
 

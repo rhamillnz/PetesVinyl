@@ -48,6 +48,7 @@ COLUMNS: list[tuple[str, str]] = [
     ("ai_estimate", "REAL"),
     ("estimated_value", "REAL"),
     ("suggested_price", "REAL"),
+    ("nz_price", "REAL"),   # cheapest copy a buyer in New Zealand can really get, postage included (typed in by hand)
     ("valuation_notes", "TEXT DEFAULT ''"),
     ("valued_at", "TEXT"),
     ("recommended_platforms", "TEXT DEFAULT '[]'"),

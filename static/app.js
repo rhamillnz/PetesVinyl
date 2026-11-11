@@ -211,6 +211,7 @@ async function route() {
   if (Date.now() - lastVersionCheck > 20000) { lastVersionCheck = Date.now(); checkVersion(); }
   try {
     if (parts[0] === "add") return await renderPhotos(null);
+    if (parts[0] === "recheck") return await renderRecheck();
     if (parts[0] === "settings") return await renderSettings(parts[1] === "find");
     if (parts[0] === "logs") return await renderLogs();
     if (parts[0] === "cordys") return await renderCordys();
@@ -262,6 +263,7 @@ async function renderHome() {
     <div class="home-bar">
       <a class="btn btn-huge" href="#/add">➕ Add a Record</a>
       <input class="search" id="search" type="search" placeholder="🔍  Find a record…" value="${esc(home.q)}" aria-label="Find a record">
+      <a class="btn btn-green" href="#/recheck">🔄 Recheck prices</a>
       <a class="btn btn-chrome" href="#/cordys">🔨 Export to Cordy's Auction</a>
     </div>
     <div class="home-bar">
@@ -1151,8 +1153,22 @@ async function renderPrice(id) {
         ${tile(rec.popsike_median, "Popsike past auctions")}
         ${tile(rec.ebay_sold_average, "eBay recent sales")}
         ${tile(rec.ai_estimate, "Internet research")}
+        ${tile(rec.nz_price, "Cheapest a NZ buyer can get")}
       </div>
       <div class="check-links" id="checkLinks"></div>
+      <div class="nz-box">
+        <h3>🇳🇿 What can a buyer in New Zealand really get it for?</h3>
+        <p>The cheapest copies on Discogs often say <b>"Unavailable in New Zealand"</b>, so they don't count here.
+          Open the copies for sale, skip those, and find the first one with a green <b>Add to Cart</b> button.
+          Type its <b>"about NZ$"</b> price (that includes postage) below. Copies on TradeMe count too.</p>
+        <div class="row" id="nzLinks"></div>
+        <div class="row" style="margin-top:12px">
+          <label for="nzInput"><b>Cheapest copy available in NZ: $</b></label>
+          <input type="number" min="0" step="1" id="nzInput" value="${rec.nz_price || ""}" style="max-width:180px">
+          <button class="btn btn-small" id="nzSave">Save and work out the price again</button>
+          ${rec.nz_price ? `<button class="btn btn-ghost btn-small" id="nzClear">✕ Clear it</button>` : ""}
+        </div>
+      </div>
       <div class="price-hero">
         <div style="font-weight:700">I suggest listing it for</div>
         <div class="big">${money(rec.suggested_price)}</div>
@@ -1179,7 +1195,22 @@ async function renderPrice(id) {
       <a class="btn btn-chrome btn-small" href="${esc(l.popsike)}" target="_blank" rel="noopener">🔎 Popsike</a>
       <a class="btn btn-chrome btn-small" href="${esc(l.ebay)}" target="_blank" rel="noopener">🔎 eBay sold items</a>
       ${l.discogs ? `<a class="btn btn-chrome btn-small" href="${esc(l.discogs)}" target="_blank" rel="noopener">🔎 Discogs sales history</a>` : ""}`;
+    $("#nzLinks").innerHTML = `
+      ${l.discogs_for_sale ? `<a class="btn btn-small" href="${esc(l.discogs_for_sale)}" target="_blank" rel="noopener">🛒 Open the Discogs copies for sale (cheapest first)</a>`
+        : `<a class="btn btn-chrome btn-small" href="#/record/${id}/details">Pick the Discogs pressing first</a>`}
+      <a class="btn btn-chrome btn-small" href="${esc(l.trademe)}" target="_blank" rel="noopener">🔎 TradeMe</a>`;
   }).catch(() => {});
+  const saveNz = async (value) => {
+    await api(`/api/records/${id}`, { method: "PUT", body: { nz_price: value } });
+    flags.value.add(id);
+    renderPrice(id);
+  };
+  $("#nzSave").addEventListener("click", () => {
+    const v = Number($("#nzInput").value);
+    if (!(v > 0)) { toast("Type the price of the cheapest copy you could really buy first.", true); return; }
+    saveNz(v);
+  });
+  if ($("#nzClear")) $("#nzClear").addEventListener("click", () => saveNz(0));
   $("#again").addEventListener("click", () => { flags.value.add(id); renderPrice(id); });
   $("#toSell").addEventListener("click", async () => {
     await savePrice();
@@ -1187,6 +1218,118 @@ async function renderPrice(id) {
     location.hash = `#/record/${id}/sell`;
   });
   $("#keep").addEventListener("click", async () => { await savePrice(); toast("Saved to your collection."); location.hash = `#/record/${id}`; });
+}
+
+// ------------------------------------------------------------------ Recheck prices for records already in the library
+async function renderRecheck() {
+  app.innerHTML = loadingHTML("Loading your records…");
+  const records = (await api("/api/records")).records.filter((r) => r.state !== "sold")
+    .sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
+  const found = {};   // record id -> newly worked-out price
+  let running = false;
+  let stop = false;
+
+  const rowHTML = (r) => `
+    <div class="recheck-row" data-id="${r.id}">
+      <input type="checkbox" class="pick" aria-label="Recheck this record" ${running ? "disabled" : ""}>
+      <span class="cordys-thumb">${r.images.front ? `<img src="${esc(r.images.front)}" alt="" loading="lazy">` : ""}</span>
+      <span class="who"><b>${esc(r.artist || "Unknown artist")}</b> · <i>${esc(r.album_title || "Untitled")}</i><br>
+        <span class="muted">${r.valued_at ? `Price checked ${ago(r.valued_at)}` : "Never price checked"}${r.nz_price ? ` · NZ copy ${money(r.nz_price)}` : " · no NZ price entered"}</span></span>
+      <span class="now">${r.suggested_price ? money(r.suggested_price) : "—"}</span>
+      <span class="result"></span>
+      <a class="btn btn-chrome btn-small" href="#/record/${r.id}/price">Open</a>
+    </div>`;
+
+  app.innerHTML = `
+    <div class="row" style="margin-bottom:18px"><a class="btn btn-chrome btn-small" href="#/">⬅ Back to all my records</a></div>
+    <div class="panel">
+      <h1>🔄 Recheck prices</h1>
+      <p style="font-size:1.1rem">Tick the records to look at again, then press the green button. I'll check each one and show the new price beside the old one.
+        <b>Nothing changes until you press "Use" on a record</b>, so a price you typed yourself is safe.
+        Press <b>Open</b> to see the details for one record, or to type in the cheapest copy a New Zealand buyer can get.</p>
+      <div class="row" style="margin-bottom:14px">
+        <button class="btn btn-chrome btn-small" data-tick="all">Tick all (${records.length})</button>
+        <button class="btn btn-chrome btn-small" data-tick="nonz">Tick the ones with no NZ price</button>
+        <button class="btn btn-chrome btn-small" data-tick="old">Tick the ones not checked this week</button>
+        <button class="btn btn-chrome btn-small" data-tick="none">Untick all</button>
+      </div>
+      <div class="recheck-list">${records.length ? records.map(rowHTML).join("") : `<p class="muted" style="padding:12px">No records to recheck yet.</p>`}</div>
+      <div class="row" style="margin-top:18px">
+        <button class="btn btn-huge btn-green" id="rcGo">🔄 Recheck the ticked records</button>
+        <button class="btn btn-red hidden" id="rcStop">✋ Stop</button>
+        <button class="btn hidden" id="rcUseAll">✅ Use all the new prices</button>
+        <span id="rcProgress" style="font-weight:700"></span>
+      </div>
+    </div>`;
+
+  const rows = () => $$(".recheck-row");
+  const byId = Object.fromEntries(records.map((r) => [r.id, r]));
+  const weekAgo = Date.now() - 7 * 24 * 3600 * 1000;
+  $$("[data-tick]").forEach((b) => b.addEventListener("click", () => {
+    if (running) return;
+    rows().forEach((row) => {
+      const r = byId[row.dataset.id];
+      $(".pick", row).checked = b.dataset.tick === "all" || (b.dataset.tick === "nonz" && !r.nz_price)
+        || (b.dataset.tick === "old" && (!r.valued_at || new Date(r.valued_at).getTime() < weekAgo));
+    });
+  }));
+
+  async function usePrice(row) {
+    const rid = Number(row.dataset.id);
+    await api(`/api/records/${rid}`, { method: "PUT", body: { suggested_price: found[rid] } });
+    $(".now", row).textContent = money(found[rid]);
+    $(".result", row).innerHTML = `<span class="badge for_sale">Price updated ✓</span>`;
+    delete found[rid];
+    $("#rcUseAll").classList.toggle("hidden", !Object.keys(found).length);
+    refreshStats();
+  }
+
+  $("#rcStop").addEventListener("click", () => { stop = true; $("#rcStop").disabled = true; });
+  $("#rcUseAll").addEventListener("click", async () => {
+    for (const row of rows()) if (found[Number(row.dataset.id)] !== undefined) await usePrice(row);
+    toast("All the new prices are saved.");
+  });
+  $("#rcGo").addEventListener("click", async () => {
+    const todo = rows().filter((row) => $(".pick", row).checked);
+    if (!todo.length) { toast("Tick at least one record first.", true); return; }
+    running = true; stop = false;
+    $("#rcGo").disabled = true; $("#rcStop").disabled = false; $("#rcStop").classList.remove("hidden");
+    let done = 0;
+    for (const row of todo) {
+      if (stop || !document.body.contains(row)) break;
+      const rid = Number(row.dataset.id);
+      $("#rcProgress").textContent = `Checking ${done + 1} of ${todo.length}…`;
+      $(".result", row).innerHTML = `<span class="muted">Checking…</span>`;
+      row.scrollIntoView({ block: "nearest" });
+      try {
+        const res = await api("/api/estimate-value", { method: "POST", body: { record_id: rid, apply: false } });
+        const was = byId[rid].suggested_price;
+        byId[rid].valued_at = new Date().toISOString();
+        if (!$(".result", row)) break;   // Pete has left this page
+        if (was && Math.round(was) === Math.round(res.suggested_price)) {
+          $(".result", row).innerHTML = `<span class="badge collection">Still ${money(was)}</span>`;
+        } else {
+          found[rid] = res.suggested_price;
+          const arrow = !was ? "" : res.suggested_price > was ? "⬆ " : "⬇ ";
+          $(".result", row).innerHTML = `<b class="new">${arrow}${money(res.suggested_price)}</b>
+            <button class="btn btn-small btn-green" data-use>Use ${money(res.suggested_price)}</button>`;
+          $("[data-use]", row).addEventListener("click", () => usePrice(row));
+          $("#rcUseAll").classList.remove("hidden");
+        }
+        $(".pick", row).checked = false;
+      } catch (e) {
+        if (!$(".result", row)) break;
+        $(".result", row).innerHTML = `<span class="badge sold">Couldn't check</span>`;
+      }
+      done += 1;
+    }
+    running = false;
+    if ($("#rcGo")) {
+      $("#rcGo").disabled = false; $("#rcStop").classList.add("hidden");
+      $("#rcProgress").textContent = `Checked ${done} record${done === 1 ? "" : "s"}${stop ? " (stopped)" : ""}.`;
+    }
+  });
+  cleanup = () => { stop = true; };
 }
 
 // ------------------------------------------------------------------ STEP 4: sell
