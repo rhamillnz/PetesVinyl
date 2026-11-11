@@ -579,3 +579,6 @@ body {
 .manual-search .row { margin: 8px 0; gap: 10px; }
 .manual-search input { flex: 1 1 240px; min-width: 0; }
 .manual-search .hint { font-size: .85rem; color: var(--text-dim); }
+
+/* ---------- the Discogs pressing that's been picked ---------- */
+.picked { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; background: rgba(54, 184, 92, .15); border: 3px solid var(--green); border-radius: 16px; padding: 12px 16px; margin-bottom: 14px; }

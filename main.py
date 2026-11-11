@@ -357,6 +357,15 @@ async def choose_discogs_match(record_id: int, body: DiscogsMatch) -> dict[str, 
     return _require(record_id)
 
 
+@app.delete("/api/records/{record_id}/discogs-match")
+def clear_discogs_match(record_id: int) -> dict[str, Any]:
+    """The wrong pressing was picked: forget it (and the price that came from it) so another can be chosen."""
+    _require(record_id)
+    db.update_record(record_id, {"discogs_release_id": "", "discogs_url": "", "discogs_median": None})
+    mark_changed()
+    return _require(record_id)
+
+
 # --------------------------------------------------------------------------- valuation
 @app.post("/api/estimate-value")
 async def estimate_value(body: ValueRequest) -> dict[str, Any]:

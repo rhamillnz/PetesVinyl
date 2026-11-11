@@ -962,6 +962,9 @@ function paintDetails(id, rec, aiInfo, matches) {
       <div class="panel">
         <h2>Which one is yours?</h2>
         <p class="muted">These are records on Discogs that match. Tap the one that looks like yours to fill in the details.</p>
+        ${rec.discogs_release_id ? `<div class="picked">✅ <b>Picked:</b> Discogs pressing ${esc(rec.discogs_release_id)}
+            <a href="https://www.discogs.com/release/${encodeURIComponent(rec.discogs_release_id)}" target="_blank" rel="noopener">See it on Discogs ↗</a>
+            <button class="btn btn-ghost btn-small" type="button" id="clearMatch">✕ That's the wrong one</button></div>` : ""}
         <div id="matchArea">${matchesHTML(matches, rec)}</div>
         <div class="manual-search">
           <label for="dq"><b>Not there? Search Discogs yourself</b></label>
@@ -997,6 +1000,21 @@ function paintDetails(id, rec, aiInfo, matches) {
   }));
   $$("[data-photo]").forEach((b) => b.addEventListener("click", () => showPhoto(b.dataset.photo)));
   bindMatches(id);
+  if ($("#clearMatch")) $("#clearMatch").addEventListener("click", async () => {
+    await saveDetails(id, owners);
+    const fresh = await api(`/api/records/${id}/discogs-match`, { method: "DELETE" });
+    toast("Okay, I've forgotten that one. Pick the right one, or search for it.");
+    paintDetails(id, fresh, null, lastMatches);
+  });
+  // Came back to change something? Show the Discogs choices straight away, so a wrong pick is easy to fix.
+  if (!matches.length && (rec.artist || rec.album_title || rec.barcode)) {
+    api(`/api/records/${id}/discogs-matches`).then((res) => {
+      const area = $("#matchArea");
+      if (!area || !res.matches.length || area.querySelector(".match, .loading")) return;
+      area.innerHTML = matchesHTML(res.matches, rec);
+      bindMatches(id);
+    }).catch(() => {});
+  }
   $("#askAI").addEventListener("click", async () => {
     await saveDetails(id, owners);
     flags.identify.add(id);
@@ -1042,7 +1060,9 @@ function paintDetails(id, rec, aiInfo, matches) {
   });
 }
 
+let lastMatches = [];   // the Discogs choices on screen, kept so the list survives picking one
 function matchesHTML(matches, rec) {
+  lastMatches = matches || [];
   if (!matches || !matches.length) return `<p class="muted">No matches to show yet.</p>`;
   return `<div class="matches">${matches.map((m) => `
     <button type="button" class="match" data-release="${esc(m.id)}" aria-pressed="${String(rec.discogs_release_id) === String(m.id)}">
@@ -1058,8 +1078,7 @@ function bindMatches(id, typed = false) {
     try {
       const rec = await api(`/api/records/${id}/discogs-match`, { method: "POST", body: { release_id: b.dataset.release, overwrite: typed } });
       toast("Got it! I've filled in the details from Discogs.");
-      const matches = $$(".match").map((m) => ({ id: m.dataset.release, title: m.querySelector("b").textContent, thumb: (m.querySelector("img") || {}).src, year: "", country: "", catno: "" }));
-      paintDetails(id, rec, null, matches);
+      paintDetails(id, rec, null, lastMatches);
     } catch (e) { toast(e.message, true); b.disabled = false; }
   }));
 }
@@ -1332,14 +1351,16 @@ async function renderRecord(id) {
           return `<li><span class="nm">${esc(p.name)}</span><span class="badge ${rec[`${p.id}_status`] === "listed" ? "for_sale" : "ready"}">${STATUS_WORDS[rec[`${p.id}_status`]]}</span>
             ${link ? `<a href="${esc(link)}" target="_blank" rel="noopener">Open ↗</a>` : ""}
             <span class="spacer"></span>
-            ${["ready", "draft", "listed"].includes(rec[`${p.id}_status`]) ? `<button class="btn btn-small btn-chrome" data-helper="${p.id}">Show listing</button>` : ""}</li>`;
+            ${["ready", "draft", "listed"].includes(rec[`${p.id}_status`]) ? `<button class="btn btn-small btn-chrome" data-helper="${p.id}">Show listing</button>` : ""}
+            ${rec[`${p.id}_status`] === "sold" ? "" : `<button class="btn btn-small btn-ghost" data-unlist="${p.id}" title="Pressed the wrong button? This puts it back to not listed.">✕ Not listed there</button>`}</li>`;
         }).join("")}</ul>` : ""}
         <div class="action-grid">
           ${rec.state === "sold"
             ? `<button class="btn btn-chrome" id="unsold">↩ Not sold after all</button>`
             : `<button class="btn btn-red btn-huge" id="sold">💰 It sold!</button>
                <a class="btn btn-green" href="#/record/${id}/sell">🛒 Sell it</a>`}
-          <a class="btn" href="#/record/${id}/details">✏️ Change details</a>
+          <a class="btn" href="#/record/${id}/details">✏️ Change details or condition</a>
+          <a class="btn btn-chrome" href="#/record/${id}/price">💲 Change the price</a>
           <button class="btn btn-chrome" id="reprice">🔄 Check price again</button>
         </div>
         <div id="helper"></div>
@@ -1354,6 +1375,13 @@ async function renderRecord(id) {
     $("#helper").innerHTML = helperCardHTML(listing);
     bindHelpers(id);
     $("#helper").scrollIntoView({ behavior: "smooth" });
+  }));
+  $$("[data-unlist]").forEach((b) => b.addEventListener("click", async () => {
+    const name = platformName(b.dataset.unlist);
+    if (!(await confirmBox(`Mark this record as NOT listed on ${name}?`, "Yes, it's not listed there"))) return;
+    await api(`/api/records/${id}/platform-status`, { method: "POST", body: { platform: b.dataset.unlist, status: "not_listed", link: "" } });
+    toast(`Okay, it's no longer marked as listed on ${name}.`);
+    route();
   }));
   $("#reprice").addEventListener("click", () => { flags.value.add(id); location.hash = `#/record/${id}/price`; });
   if ($("#sold")) $("#sold").addEventListener("click", () => soldDialog(rec, platforms));
