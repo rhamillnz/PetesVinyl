@@ -246,7 +246,16 @@ function stepsBar(id, current) {
 }
 
 // ------------------------------------------------------------------ HOME: the jukebox wall
-const home = { state: store.get("pv.filter", ""), q: "" };
+const home = { state: store.get("pv.filter", ""), band: store.get("pv.band", ""), q: "" };
+// Records worth this much or more are the rare ones: too good for a general auction.
+const RARE_FROM = 100;
+const isRare = (r) => Number(r.suggested_price) >= RARE_FROM;
+function inBand(r, band) {
+  if (!band) return true;
+  if (band === "none") return !r.suggested_price;
+  if (band === "rare") return isRare(r);
+  return !!r.suggested_price && !isRare(r);
+}
 
 async function renderHome() {
   app.innerHTML = loadingHTML("Loading your records…");
@@ -256,7 +265,9 @@ async function renderHome() {
   const counts = { "": all.length, collection: 0, ready: 0, for_sale: 0, sold: 0 };
   all.forEach((r) => { counts[r.state] += 1; });
   counts.collection += counts.ready;
-  const shown = all.filter((r) => !home.state || r.state === home.state || (home.state === "collection" && r.state === "ready"));
+  const inState = all.filter((r) => !home.state || r.state === home.state || (home.state === "collection" && r.state === "ready"));
+  const shown = inState.filter((r) => inBand(r, home.band));
+  const bands = [["", "Any price"], ["under", `Under $${RARE_FROM}`], ["rare", `⭐ Rare: $${RARE_FROM} and over`], ["none", "No price yet"]];
   const tabs = [["", "All"], ["collection", "In my collection"], ["for_sale", "For sale"], ["sold", "Sold"]];
 
   app.innerHTML = `
@@ -271,9 +282,16 @@ async function renderHome() {
         ${tabs.map(([key, label]) => `<button class="tab" data-state="${key}" aria-pressed="${home.state === key}">${label} (${counts[key]})</button>`).join("")}
       </div>
     </div>
+    <div class="home-bar">
+      <div class="tabs" role="group" aria-label="Price">
+        ${bands.map(([key, label]) => `<button class="tab band ${key === "rare" ? "rare" : ""}" data-band="${key}" aria-pressed="${home.band === key}">${label} (${inState.filter((r) => inBand(r, key)).length})</button>`).join("")}
+      </div>
+    </div>
+    ${home.band === "rare" && shown.length ? `<p class="rare-note">⭐ These are the rare ones. Keep them out of the general auction and sell them on a specialist record site instead.</p>` : ""}
     ${shown.length ? jukeboxHTML(shown) : emptyHTML(all.length)}`;
 
-  $$(".tab").forEach((t) => t.addEventListener("click", () => { home.state = t.dataset.state; store.set("pv.filter", home.state); renderHome(); }));
+  $$(".tab[data-state]").forEach((t) => t.addEventListener("click", () => { home.state = t.dataset.state; store.set("pv.filter", home.state); renderHome(); }));
+  $$(".tab[data-band]").forEach((t) => t.addEventListener("click", () => { home.band = t.dataset.band; store.set("pv.band", home.band); renderHome(); }));
   let timer;
   $("#search").addEventListener("input", (e) => {
     clearTimeout(timer);
@@ -339,7 +357,7 @@ function cardHTML(r, code = "") {
   const priceTag = price ? `<span class="price">${price}</span>` : `<span class="price none">No price yet</span>`;
   return `
     <a class="card" href="#/record/${r.id}">
-      <div class="card-img">${img}${r.state === "sold" ? `<div class="sold-stamp">SOLD ${money(r.sold_price)}</div>` : ""}</div>
+      <div class="card-img">${img}${isRare(r) && r.state !== "sold" ? `<div class="rare-flag">⭐ Rare</div>` : ""}${r.state === "sold" ? `<div class="sold-stamp">SOLD ${money(r.sold_price)}</div>` : ""}</div>
       <div class="strip">
         ${code ? `<span class="code">${esc(code)}</span>` : ""}
         <div class="artist">${esc(r.artist || "Unknown artist")}</div>
@@ -372,7 +390,9 @@ async function renderCordys() {
 
   const rowHTML = (r) => {
     const listed = (platformsCache || []).filter((p) => r[`${p.id}_status`] === "listed").map((p) => p.name);
-    const notes = [r.cordys_exported_at ? `Exported ${esc(ago(r.cordys_exported_at))}` : "",
+    const notes = [r.suggested_price ? money(r.suggested_price) : "No price yet",
+      isRare(r) ? `<span class="badge ready">⭐ Rare: better on a specialist site</span>` : "",
+      r.cordys_exported_at ? `Exported ${esc(ago(r.cordys_exported_at))}` : "",
       listed.length ? `For sale on ${esc(listed.join(", "))}` : ""].filter(Boolean).join(" · ");
     return `<label class="cordys-row">
       <input type="checkbox" data-id="${r.id}" ${cordysChoice.ids.has(r.id) ? "checked" : ""}>
@@ -388,10 +408,12 @@ async function renderCordys() {
       <p>Wrap up your photos and descriptions into one file to send to Cordy's. Your records aren't changed.</p>
       <h2>1. Tick the records</h2>
       ${records.length ? `<div class="row" style="margin-bottom:12px">
+        <button class="btn btn-small" id="cordysUnder">Tick all under $${RARE_FROM}</button>
         <button class="btn btn-chrome btn-small" id="cordysAll">Tick all</button>
         <button class="btn btn-chrome btn-small" id="cordysNone">Untick all</button>
         <b id="cordysCount"></b></div>
-      <div class="cordys-list">${records.map(rowHTML).join("")}</div>` : `<p>You have no unsold records to export yet.</p>`}
+      <div class="cordys-list">${records.map(rowHTML).join("")}</div>
+      <div id="cordysRare"></div>` : `<p>You have no unsold records to export yet.</p>`}
       <h2>2. Choose a style</h2>
       ${CORDYS_STYLES.map(([key, name, about]) => `<label class="cordys-style">
         <input type="radio" name="cordysStyle" value="${key}" ${cordysChoice.style === key ? "checked" : ""}>
@@ -410,14 +432,24 @@ async function renderCordys() {
     const count = $("#cordysCount");
     if (count) count.textContent = `${n} of ${records.length} ticked`;
     $("#cordysGo").disabled = !n;
+    const rare = records.filter((r) => cordysChoice.ids.has(r.id) && isRare(r));
+    const unpriced = records.filter((r) => cordysChoice.ids.has(r.id) && !r.suggested_price);
+    const warn = $("#cordysRare");
+    if (warn) warn.innerHTML = [
+      rare.length ? `<div class="ai-box warn" style="margin-top:14px"><span class="icon">⭐</span><div><b>${rare.length} rare record${rare.length === 1 ? " is" : "s are"} ticked</b> (worth $${RARE_FROM} or more): ${esc(rare.map((r) => `${r.artist || "Unknown artist"} - ${r.album_title || "Untitled"}`).join("; "))}.<br>
+        These usually do better on a specialist record site than in a general auction. <button class="btn btn-small" id="cordysDropRare" style="margin-top:8px">Untick the rare ones</button></div></div>` : "",
+      unpriced.length ? `<div class="ai-box warn" style="margin-top:14px"><span class="icon">❓</span><div><b>${unpriced.length} ticked record${unpriced.length === 1 ? " has" : "s have"} no price yet</b>, so I can't tell whether ${unpriced.length === 1 ? "it's" : "they're"} rare. Check the price first if you're not sure.</div></div>` : "",
+    ].join("");
+    if ($("#cordysDropRare")) $("#cordysDropRare").addEventListener("click", () => setOnly((r) => cordysChoice.ids.has(r.id) && !isRare(r)));
     $("#cordysSmallRow").style.opacity = cordysChoice.style === "pdf" ? ".5" : "1";
     $("#cordysSmall").disabled = cordysChoice.style === "pdf";
   };
-  const setAll = (on) => {
-    cordysChoice.ids = new Set(on ? records.map((r) => r.id) : []);
-    $$(".cordys-row input").forEach((box) => { box.checked = on; });
+  const setOnly = (want) => {
+    cordysChoice.ids = new Set(records.filter(want).map((r) => r.id));
+    $$(".cordys-row input").forEach((box) => { box.checked = cordysChoice.ids.has(Number(box.dataset.id)); });
     paint();
   };
+  const setAll = (on) => setOnly(() => on);
   $$(".cordys-row input").forEach((box) => box.addEventListener("change", () => {
     const id = Number(box.dataset.id);
     if (box.checked) cordysChoice.ids.add(id); else cordysChoice.ids.delete(id);
@@ -425,6 +457,7 @@ async function renderCordys() {
   }));
   if (records.length) {
     $("#cordysAll").addEventListener("click", () => setAll(true));
+    $("#cordysUnder").addEventListener("click", () => setOnly((r) => !!r.suggested_price && !isRare(r)));
     $("#cordysNone").addEventListener("click", () => setAll(false));
   }
   $$('input[name="cordysStyle"]').forEach((r) => r.addEventListener("change", () => { cordysChoice.style = r.value; paint(); }));

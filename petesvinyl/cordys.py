@@ -130,7 +130,8 @@ def spreadsheet(recs: list[dict[str, Any]], files: dict[int, list[str]], prices:
                f"https://www.discogs.com/release/{release}" if release else "", len(files[rec["id"]]),
                "; ".join(files[rec["id"]])]
         if prices:
-            row.append(rec.get("suggested_price") or "")
+            price = rec.get("suggested_price") or ""
+            row.append(int(price) if isinstance(price, float) and price.is_integer() else price)   # 150, not 150.0
         writer.writerow([_spreadsheet_cell(v) for v in row])
     return out.getvalue().encode("utf-8-sig")    # the marker makes Excel read accented names correctly
 
@@ -218,6 +219,10 @@ table { width: 100%; border-collapse: collapse; }
 figure { margin: 0; break-inside: avoid; }
 figure img { width: 100%; height: 56mm; object-fit: contain; background: #f2f2f2; display: block; }
 figcaption { font: 8pt Arial, sans-serif; color: #666; padding-top: 1mm; }
+.photos.few { grid-template-columns: repeat(2, 1fr); }
+.photos.few figure img { height: 86mm; }
+.photos.one { grid-template-columns: 1fr; }
+.photos.one figure img { height: 150mm; }
 """
 
 
@@ -237,7 +242,7 @@ def pdf_html(recs: list[dict[str, Any]], pictures: dict[int, list[tuple[str, str
         figures = "".join(f'<figure><img src="{e(src)}" alt=""><figcaption>{e(label)}</figcaption></figure>'
                           for label, src in pictures[rec["id"]])
         lots.append(f'<section class="lot"><div class="ref">{ref(rec)}</div><h2>{e(lot_title(rec))}</h2>'
-                    f'<table class="facts">{rows}</table><p class="cond">{e(extra)}</p><div class="photos">{figures}</div></section>')
+                    f'<table class="facts">{rows}</table><p class="cond">{e(extra)}</p><div class="photos{" one" if len(pictures[rec["id"]]) == 1 else " few" if len(pictures[rec["id"]]) == 2 else ""}">{figures}</div></section>')
     when = datetime.now().strftime("%d %B %Y").lstrip("0")
     return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Record collection</title>'
             f"<style>{PDF_STYLE}</style></head><body>"

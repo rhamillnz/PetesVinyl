@@ -597,3 +597,8 @@ body {
 .recheck-row .now { font-size: 1.3rem; font-weight: 900; min-width: 80px; text-align: right; }
 .recheck-row .result { min-width: 230px; display: flex; align-items: center; gap: 10px; }
 .recheck-row .result .new { font-size: 1.3rem; color: var(--amber); }
+
+/* ---------- rare records (worth $100 or more) ---------- */
+.tab.band.rare[aria-pressed="true"] { background: var(--amber); color: var(--ink); border-color: var(--amber-deep); }
+.rare-flag { position: absolute; top: 6px; left: 6px; background: var(--amber); color: var(--ink); font-weight: 900; font-size: .8rem; padding: 2px 9px; border-radius: 999px; box-shadow: 0 2px 6px rgba(0, 0, 0, .6); }
+.rare-note { background: var(--amber); color: var(--ink); font-weight: 700; border-radius: 14px; padding: 12px 18px; margin: 0 0 18px; }
