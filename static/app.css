@@ -602,3 +602,15 @@ body {
 .tab.band.rare[aria-pressed="true"] { background: var(--amber); color: var(--ink); border-color: var(--amber-deep); }
 .rare-flag { position: absolute; top: 6px; left: 6px; background: var(--amber); color: var(--ink); font-weight: 900; font-size: .8rem; padding: 2px 9px; border-radius: 999px; box-shadow: 0 2px 6px rgba(0, 0, 0, .6); }
 .rare-note { background: var(--amber); color: var(--ink); font-weight: 700; border-radius: 14px; padding: 12px 18px; margin: 0 0 18px; }
+
+/* ---------- selecting several records on the home screen ---------- */
+.select-bar { position: sticky; top: 8px; z-index: 30; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px;
+  background: linear-gradient(180deg, var(--panel-2), var(--panel)); color: var(--text); border: 4px solid var(--amber);
+  border-radius: 18px; padding: 12px 16px; margin-bottom: 18px; box-shadow: var(--shadow); }
+.select-bar b { font-size: 1.3rem; min-width: 110px; }
+.select-bar .hint { width: 100%; font-size: .85rem; color: var(--text-dim); }
+.card .tick { display: none; position: absolute; top: 6px; right: 6px; z-index: 2; width: 40px; height: 40px; border-radius: 10px;
+  place-items: center; font-size: 1.6rem; font-weight: 900; color: transparent; background: rgba(255, 255, 255, .85); border: 4px solid #333; }
+.select-bar ~ .jukebox-window .card .tick { display: grid; }
+.card.chosen .tick { background: var(--green); border-color: #fff; color: #fff; }
+.card.chosen { box-shadow: 0 0 0 5px var(--green), 0 8px 18px rgba(0, 0, 0, .5); }

@@ -246,7 +246,7 @@ function stepsBar(id, current) {
 }
 
 // ------------------------------------------------------------------ HOME: the jukebox wall
-const home = { state: store.get("pv.filter", ""), band: store.get("pv.band", ""), q: "" };
+const home = { state: store.get("pv.filter", ""), band: store.get("pv.band", ""), q: "", selecting: false, picked: new Set() };
 // Records worth this much or more are the rare ones: too good for a general auction.
 const RARE_FROM = 100;
 const isRare = (r) => Number(r.suggested_price) >= RARE_FROM;
@@ -278,7 +278,17 @@ async function renderHome() {
       <input class="search" id="search" type="search" placeholder="🔍  Find a record…" value="${esc(home.q)}" aria-label="Find a record">
       <a class="btn btn-green" href="#/recheck">🔄 Recheck prices</a>
       <a class="btn btn-chrome" href="#/cordys">🔨 Export to Cordy's Auction</a>
+      <button class="btn ${home.selecting ? "" : "btn-chrome"}" id="selToggle">${home.selecting ? "✖ Stop selecting" : "☑ Select several records"}</button>
     </div>
+    ${home.selecting ? `<div class="select-bar" id="selectBar">
+      <b id="selCount"></b>
+      <button class="btn btn-chrome btn-small" id="selAll">Tick all ${shown.length} shown</button>
+      <button class="btn btn-chrome btn-small" id="selNone">Untick all</button>
+      <span class="spacer"></span>
+      <button class="btn btn-small" id="selCordys">🔨 Mark as for sale at Cordy's</button>
+      <button class="btn btn-ghost btn-small" id="selOffCordys">↩ Take off Cordy's</button>
+      <div class="hint">Tap records to tick them. Use the buttons above (For sale, Under $100 and so on) to show just the ones you want first.</div>
+    </div>` : ""}
     <div class="home-bar">
       <div class="tabs" role="group" aria-label="Show">
         ${tabs.map(([key, label]) => `<button class="tab" data-state="${key}" aria-pressed="${home.state === key}">${label} (${counts[key]})</button>`).join("")}
@@ -292,6 +302,40 @@ async function renderHome() {
     ${home.band === "rare" && shown.length ? `<p class="rare-note">⭐ These are the rare ones. Keep them out of the general auction and sell them on a specialist record site instead.</p>` : ""}
     ${shown.length ? jukeboxHTML(shown) : emptyHTML(all.length)}`;
 
+  $("#selToggle").addEventListener("click", () => { home.selecting = !home.selecting; home.picked = new Set(); renderHome(); });
+  if (home.selecting) {
+    const known = new Set(all.map((r) => r.id));
+    home.picked = new Set([...home.picked].filter((rid) => known.has(rid)));
+    const paintSel = () => {
+      const n = home.picked.size;
+      $("#selCount").textContent = `${n} ticked`;
+      $("#selCordys").disabled = !n; $("#selOffCordys").disabled = !n;
+      $$(".card[data-id]").forEach((c) => c.classList.toggle("chosen", home.picked.has(Number(c.dataset.id))));
+    };
+    $$(".card[data-id]").forEach((c) => c.addEventListener("click", (e) => {
+      e.preventDefault();
+      const rid = Number(c.dataset.id);
+      if (home.picked.has(rid)) home.picked.delete(rid); else home.picked.add(rid);
+      paintSel();
+    }));
+    $("#selAll").addEventListener("click", () => { shown.forEach((r) => home.picked.add(r.id)); paintSel(); });
+    $("#selNone").addEventListener("click", () => { home.picked = new Set(); paintSel(); });
+    const markPicked = async (on) => {
+      const ids = [...home.picked];
+      const rare = all.filter((r) => home.picked.has(r.id) && isRare(r)).length;
+      const ask = on ? `Mark ${ids.length} record${ids.length === 1 ? "" : "s"} as for sale at Cordy's?${rare ? ` (${rare} of them ${rare === 1 ? "is" : "are"} rare: $${RARE_FROM} or more.)` : ""}`
+        : `Take ${ids.length} record${ids.length === 1 ? "" : "s"} back off Cordy's?`;
+      if (!(await confirmBox(ask, on ? "Yes, mark them" : "Yes, take them off"))) return;
+      const res = await api("/api/cordys/mark", { method: "POST", body: { record_ids: ids, at_cordys: on } });
+      toast(on ? `${res.changed} record${res.changed === 1 ? " is" : "s are"} now marked as for sale at Cordy's.`
+        : `${res.changed} record${res.changed === 1 ? " is" : "s are"} no longer marked as at Cordy's.`);
+      home.picked = new Set();
+      renderHome();
+    };
+    $("#selCordys").addEventListener("click", () => markPicked(true));
+    $("#selOffCordys").addEventListener("click", () => markPicked(false));
+    paintSel();
+  }
   $$(".tab[data-state]").forEach((t) => t.addEventListener("click", () => { home.state = t.dataset.state; store.set("pv.filter", home.state); renderHome(); }));
   $$(".tab[data-band]").forEach((t) => t.addEventListener("click", () => { home.band = t.dataset.band; store.set("pv.band", home.band); renderHome(); }));
   let timer;
@@ -358,8 +402,8 @@ function cardHTML(r, code = "") {
   if (r.state === "sold") price = money(r.sold_price);
   const priceTag = price ? `<span class="price">${price}</span>` : `<span class="price none">No price yet</span>`;
   return `
-    <a class="card" href="#/record/${r.id}">
-      <div class="card-img">${img}${isRare(r) && r.state !== "sold" ? `<div class="rare-flag">⭐ Rare</div>` : ""}${r.state === "sold" ? `<div class="sold-stamp">SOLD ${money(r.sold_price)}</div>` : ""}</div>
+    <a class="card" href="#/record/${r.id}" data-id="${r.id}">
+      <div class="card-img"><span class="tick" aria-hidden="true">✓</span>${img}${isRare(r) && r.state !== "sold" ? `<div class="rare-flag">⭐ Rare</div>` : ""}${r.state === "sold" ? `<div class="sold-stamp">SOLD ${money(r.sold_price)}</div>` : ""}</div>
       <div class="strip">
         ${code ? `<span class="code">${esc(code)}</span>` : ""}
         <div class="artist">${esc(r.artist || "Unknown artist")}</div>
