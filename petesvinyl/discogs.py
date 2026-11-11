@@ -5,6 +5,7 @@ Get a personal token at https://www.discogs.com/settings/developers (free, insta
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 import httpx
@@ -91,6 +92,67 @@ async def search(record: dict[str, Any]) -> list[dict[str, Any]]:
             activity.record("Discogs", "No pressings found for that search", False, str(params))
         if results:
             return _rank(results, record)
+    return []
+
+
+RELEASE_LINK = re.compile(r"(?:discogs\.com/(?:[a-z-]+/)?release/|\[r|^r(?=\d+$))(\d+)", re.I)
+MASTER_LINK = re.compile(r"(?:discogs\.com/(?:[a-z-]+/)?master/|\[m)(\d+)", re.I)
+
+
+def clean_artist(name: str) -> str:
+    """Discogs numbers artists who share a name, e.g. 'Nirvana (2)'. Drop the number."""
+    return re.sub(r"\s*\(\d+\)$", "", name or "").strip()
+
+
+async def search_text(text: str, record: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    """A search typed in by hand, for records the automatic search can't find.
+
+    Accepts plain words (artist, title, label, catalogue number, in any mix), a barcode, or a Discogs web
+    address / release number pasted from the Discogs site, which goes straight to that exact pressing.
+    A 'master' address lists every pressing of that album.
+    """
+    text = (text or "").strip()
+    if not text or not is_configured():
+        return []
+    record = record or {}
+    found = RELEASE_LINK.search(text)
+    if found:
+        try:
+            rel = await release(found.group(1))
+        except httpx.HTTPError:
+            return []
+        labels = rel.get("labels") or [{}]
+        artists = ", ".join(clean_artist(a.get("name", "")) for a in rel.get("artists") or [])
+        return [{
+            "id": str(rel.get("id")), "title": f"{artists} - {rel.get('title', '')}".strip(" -"),
+            "year": rel.get("year"), "country": rel.get("country"), "label": labels[0].get("name", ""),
+            "catno": labels[0].get("catno", ""), "thumb": rel.get("thumb") or "",
+            "url": rel.get("uri", ""),
+        }]
+    found = MASTER_LINK.search(text)
+    if found:
+        try:
+            data = await _get(f"/masters/{found.group(1)}/versions", {"per_page": 100})
+        except httpx.HTTPError:
+            return []
+        versions = [v for v in data.get("versions") or [] if "Vinyl" in (v.get("major_formats") or ["Vinyl"])]
+        return _rank([{**v, "year": str(v.get("released") or "")[:4], "uri": f"/release/{v.get('id')}",
+                       "label": [v.get("label") or ""]} for v in versions], record)
+    digits = "".join(ch for ch in text if ch.isdigit())
+    attempts: list[dict[str, Any]] = []
+    if len(digits) >= 10 and len(digits) >= len(text.replace(" ", "")) - 2:
+        attempts.append({"barcode": digits})
+    attempts += [{"q": text, "format": "Vinyl"}, {"q": text}]   # records first, then anything (odd formats)
+    for params in attempts:
+        params = {"type": "release", "per_page": 25, **params}
+        try:
+            data = await _get("/database/search", params)
+        except httpx.HTTPError as exc:
+            log.warning("Discogs search failed: %s", exc)
+            continue
+        if data.get("results"):
+            return _rank(data["results"], record)
+    activity.record("Discogs", "No pressings found for that typed search", False, text)
     return []
 
 

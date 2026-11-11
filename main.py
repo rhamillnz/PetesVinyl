@@ -129,6 +129,7 @@ class SoldRequest(BaseModel):
 
 class DiscogsMatch(BaseModel):
     release_id: str
+    overwrite: bool = False   # picked from a typed search: trust Discogs over what the AI read
 
 
 class CordysExport(BaseModel):
@@ -321,6 +322,12 @@ async def discogs_matches(record_id: int) -> dict[str, Any]:
     return {"matches": (await discogs.search(_require(record_id)))[:12], "configured": discogs.is_configured()}
 
 
+@app.get("/api/records/{record_id}/discogs-search")
+async def discogs_search(record_id: int, q: str = "") -> dict[str, Any]:
+    """A search typed in by hand (words, a barcode, or a Discogs web address), for records the automatic search misses."""
+    return {"matches": await discogs.search_text(q, _require(record_id)), "configured": discogs.is_configured()}
+
+
 @app.post("/api/records/{record_id}/discogs-match")
 async def choose_discogs_match(record_id: int, body: DiscogsMatch) -> dict[str, Any]:
     """Pete picked the right pressing from the list - copy its details onto the record."""
@@ -332,8 +339,9 @@ async def choose_discogs_match(record_id: int, body: DiscogsMatch) -> dict[str, 
         barcodes = [i.get("value", "") for i in rel.get("identifiers") or [] if i.get("type") == "Barcode"]
         matrix = [i.get("value", "") for i in rel.get("identifiers") or [] if i.get("type") == "Matrix / Runout"]
         updates.update({
-            "artist": rec.get("artist") or ", ".join(a.get("name", "") for a in rel.get("artists") or []),
-            "album_title": rec.get("album_title") or rel.get("title", ""),
+            "artist": (not body.overwrite and rec.get("artist"))
+                      or ", ".join(discogs.clean_artist(a.get("name", "")) for a in rel.get("artists") or []),
+            "album_title": (not body.overwrite and rec.get("album_title")) or rel.get("title", ""),
             "year_pressed": str(rel.get("year") or rec.get("year_pressed") or ""),
             "pressing_location": rel.get("country") or rec.get("pressing_location") or "",
             "label": labels[0].get("name", ""),

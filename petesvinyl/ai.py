@@ -147,7 +147,8 @@ async def chat_json(content: list[dict[str, Any]], web_search: bool = False, max
 IDENTIFY_PROMPT = """You are an expert vinyl record appraiser helping an elderly collector in {location} catalogue his records.
 Look at these photos of ONE record ({which}). Identify the exact release and pressing.
 First read ALL the text printed on the covers and labels (artist, title, label, catalogue number, barcode,
-matrix/runout etchings, small print like "Made in England" or "Manufactured by ... NZ"). Use that text,
+matrix/runout etchings, small print like "Made in England" or "Manufactured by ... NZ"). If the record is
+pulled part-way out of the cover so its centre label shows, read that label too. Use that text,
 plus your own knowledge of the release, to identify the exact pressing. Never leave artist or album_title
 empty if any text on the cover gives a clue; give your best guess and set confidence to "low".
 

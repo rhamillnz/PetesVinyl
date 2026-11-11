@@ -334,6 +334,7 @@ function cardHTML(r, code = "") {
   let badge = `<span class="badge ${r.state}">${STATE_LABEL[r.state]}</span>`;
   let price = r.suggested_price ? money(r.suggested_price) : "";
   if (r.state === "sold") price = money(r.sold_price);
+  const priceTag = price ? `<span class="price">${price}</span>` : `<span class="price none">No price yet</span>`;
   return `
     <a class="card" href="#/record/${r.id}">
       <div class="card-img">${img}${r.state === "sold" ? `<div class="sold-stamp">SOLD ${money(r.sold_price)}</div>` : ""}</div>
@@ -342,7 +343,7 @@ function cardHTML(r, code = "") {
         <div class="artist">${esc(r.artist || "Unknown artist")}</div>
         <div class="album">${esc(r.album_title || "Untitled")}</div>
       </div>
-      <div class="card-foot">${badge}<span>${price}</span></div>
+      <div class="card-foot">${priceTag}${badge}</div>
       ${listedOn.length ? `<div class="sites">On: ${esc(listedOn.join(", "))}</div>` : ""}
     </a>`;
 }
@@ -466,11 +467,31 @@ const SLOTS = [
   { key: "disc_b", label: "Side B label", say: "the SIDE B LABEL", tip: "Flip the record over and show the Side B label.", icon: "💿" },
 ];
 
+// Quick way (all Cordy's auction needs): one photo of the front cover with the record pulled part-way out,
+// so the middle label shows too.
+const QUICK_SLOT = { key: "front", label: "Cover + record", say: "the FRONT COVER with the RECORD POKING OUT",
+  tip: "Slide the record part-way out of the cover so its middle label shows, then hold both up together.", icon: "🖼️" };
+
+// Look records up one after another in the background, so Pete can keep photographing.
+let lookupQueue = Promise.resolve();
+function lookUpLater(recordId) {
+  lookupQueue = lookupQueue
+    .then(() => api(`/api/records/${recordId}/identify`, { method: "POST" }))
+    .then(() => api("/api/estimate-value", { method: "POST", body: { record_id: recordId } }))
+    .then(() => { if (!location.hash.replace(/^#\/?/, "")) renderHome(); else refreshStats(); })
+    .catch(() => { /* it stays in the library; opening it tries again */ });
+}
+
 async function renderPhotos(id) {
   const rec = id ? await api(`/api/records/${id}`) : null;
   const shots = {};          // new photos taken this visit (data URLs)
   const existing = { ...(rec ? rec.images : {}) };
-  const slots = [...SLOTS];  // the four standard photos, plus any extras (more discs, inserts, close-ups)
+  const hasFullSet = ["back", "disc_a", "disc_b"].some((k) => existing[k]);
+  let mode = hasFullSet ? "full" : store.get("pv.photoMode", "full");   // "quick" = one photo, "full" = covers and labels
+  const baseSlots = () => (mode === "quick"
+    ? [QUICK_SLOT, ...SLOTS.slice(1).filter((s) => shots[s.key] || existing[s.key])]   // never hide a photo already taken
+    : SLOTS);
+  const slots = [...baseSlots()];  // the standard photos, plus any extras (more discs, inserts, close-ups)
   let extraSeq = 0;
   let discCount = rec ? rec.disc_count : 1;
   ((rec && rec.extras) || []).forEach((e) => {
@@ -483,6 +504,10 @@ async function renderPhotos(id) {
 
   app.innerHTML = `
     ${stepsBar(id, "photos")}
+    <div class="mode-bar" role="group" aria-label="How many photos">
+      <button type="button" class="mode" data-mode="quick"><b>⚡ Quick: one photo</b><small>Front cover with the record poking out. All Cordy's needs.</small></button>
+      <button type="button" class="mode" data-mode="full"><b>📚 Full set: four photos</b><small>Front, back and both labels. Best for selling online.</small></button>
+    </div>
     <div class="grid-2">
       <div>
         <div class="camera-frame">
@@ -510,6 +535,8 @@ async function renderPhotos(id) {
         <button class="btn btn-huge btn-block btn-red" id="snap">📷 Take Photo</button>
         <p class="muted" style="text-align:center">or press the <span class="kbd">Space bar</span></p>
         <button class="btn btn-huge btn-block btn-green" id="next" style="margin-top:14px">${id ? "Save photos ✓" : "Next: Look it up ➜"}</button>
+        ${id ? "" : `<button class="btn btn-block" id="saveNext" style="margin-top:14px">💾 Save it and photograph the next record</button>
+        <p class="muted" style="text-align:center;margin:8px 0 0">I'll look it up and price it in the background while you carry on.</p>`}
         <div class="row" style="margin-top:22px;justify-content:center">
           <label class="btn btn-ghost btn-small">🖼️ Use a saved picture instead
             <input type="file" id="upload" accept="image/*" hidden>
@@ -525,7 +552,10 @@ async function renderPhotos(id) {
       slots.push({ key: `extra_${extraSeq}`, label, say, tip, icon, extra: true });
       current = slots.length - 1;
     };
-    if (kind === "disc") {
+    if (kind === "disc" && mode === "quick") {
+      discCount += 1;
+      add(`Disc ${discCount} label`, `the label of DISC ${discCount}`, "Take the next record out of the cover and show its middle label.", "💿");
+    } else if (kind === "disc") {
       discCount += 1;
       add(`Disc ${discCount} - Side A`, `DISC ${discCount}, SIDE A label`, "Take the next record out of the cover and show the Side A label.", "💿");
       add(`Disc ${discCount} - Side B`, `DISC ${discCount}, SIDE B label`, "Flip it over and show the Side B label.", "💿");
@@ -541,6 +571,16 @@ async function renderPhotos(id) {
   }
   // Give the keyboard back to the camera afterwards, so Space takes the photo instead of pressing this button again.
   $$("[data-extra]").forEach((b) => b.addEventListener("click", () => { addExtra(b.dataset.extra); b.blur(); }));
+
+  function setMode(next) {
+    mode = next;
+    store.set("pv.photoMode", mode);
+    slots.splice(0, slots.length, ...baseSlots(), ...slots.filter((s) => s.extra));
+    const empty = slots.findIndex((s) => !shots[s.key] && !existing[s.key]);
+    current = empty === -1 ? 0 : empty;
+    paint();
+  }
+  $$(".mode").forEach((b) => b.addEventListener("click", () => { setMode(b.dataset.mode); b.blur(); }));
 
   async function removeCurrentExtra() {
     const slot = slots[current];
@@ -570,14 +610,19 @@ async function renderPhotos(id) {
     $$(".thumb").forEach((b) => b.addEventListener("click", () => { current = Number(b.dataset.i); paint(); b.blur(); }));
     const haveFront = shots.front || existing.front;
     $("#next").disabled = !haveFront && !Object.keys(shots).length;
+    if ($("#saveNext")) $("#saveNext").disabled = $("#next").disabled;
+    $$(".mode").forEach((b) => b.setAttribute("aria-pressed", b.dataset.mode === mode));
   }
 
   function addShot(dataUrl) {
     shots[slots[current].key] = dataUrl;
     const nextEmpty = slots.findIndex((s) => !shots[s.key] && !existing[s.key]);
     if (nextEmpty === -1) {
-      toast("All the photos are done! Add more if there's another record or a poster, or press the green button.");
-      $("#next").focus();
+      toast(slots.length === 1 ? "Got it! Press a green or gold button, or add more photos below."
+        : "All the photos are done! Add more if there's another record or a poster, or press the green button.");
+      // Space now presses the next step: in quick mode that is "save and do the next record", so a pile of
+      // records is just Space, Space, Space...
+      ((mode === "quick" && $("#saveNext")) || $("#next")).focus();
     } else {
       current = nextEmpty;
     }
@@ -745,6 +790,20 @@ async function renderPhotos(id) {
     }
   });
 
+  if ($("#saveNext")) $("#saveNext").addEventListener("click", async () => {
+    const btn = $("#saveNext");
+    btn.disabled = true; btn.textContent = "Saving…";
+    try {
+      const created = await api("/api/records", { method: "POST", body: { images: shots, extra_labels: labelsFor(), disc_count: discCount, is_first_owner: true } });
+      lookUpLater(created.id);
+      toast("Saved! I'm looking it up in the background. Ready for the next record.");
+      route();   // a fresh photo page for the next record
+    } catch (e) {
+      toast(e.message, true);
+      btn.disabled = false; btn.textContent = "Try saving again";
+    }
+  });
+
   cleanup = () => {
     document.removeEventListener("keydown", onKey);
     clearInterval(sharpTimer);
@@ -904,11 +963,20 @@ function paintDetails(id, rec, aiInfo, matches) {
         <h2>Which one is yours?</h2>
         <p class="muted">These are records on Discogs that match. Tap the one that looks like yours to fill in the details.</p>
         <div id="matchArea">${matchesHTML(matches, rec)}</div>
+        <div class="manual-search">
+          <label for="dq"><b>Not there? Search Discogs yourself</b></label>
+          <div class="row">
+            <input type="text" id="dq" placeholder="Artist, title, label or catalogue number" value="${esc([rec.artist, rec.album_title].filter(Boolean).join(" "))}">
+            <button class="btn btn-small" type="button" id="dqGo">🔍 Search</button>
+          </div>
+          <span class="hint">Type any words, a catalogue number or a barcode. Or find the record on discogs.com and paste its web address here to pick that exact pressing.
+            <a href="https://www.discogs.com/search/?type=release&format_exact=Vinyl&q=${encodeURIComponent([rec.artist, rec.album_title].filter(Boolean).join(" "))}" target="_blank" rel="noopener">Open Discogs ↗</a></span>
+        </div>
         <button class="btn btn-small btn-chrome" id="findMatches">🔍 Search Discogs again</button>
         <button class="btn btn-small btn-chrome" id="askAI">🤖 Read the photos again</button>
         <div class="photos-big" style="margin-top:22px">${SLOTS.map((s) => rec.images[s.key]
           ? `<button type="button" data-photo="${esc(rec.images[s.key])}"><img src="${esc(rec.images[s.key])}" alt="${s.label}"></button>`
-          : `<button type="button" disabled><span class="none">No ${s.label.toLowerCase()}</span></button>`).join("")}</div>
+          : (rec.images.back || rec.images.disc_a || rec.images.disc_b) ? `<button type="button" disabled><span class="none">No ${s.label.toLowerCase()}</span></button>` : "").join("")}</div>
       </div>
     </div>`;
 
@@ -944,6 +1012,23 @@ function paintDetails(id, rec, aiInfo, matches) {
     bindMatches(id);
   });
 
+  const typedSearch = async () => {
+    const q = $("#dq").value.trim();
+    if (!q) { toast("Type something to search for first.", true); return; }
+    await saveDetails(id, owners);
+    $("#matchArea").innerHTML = loadingHTML("Searching Discogs…");
+    try {
+      const res = await api(`/api/records/${id}/discogs-search?q=${encodeURIComponent(q)}`);
+      const fresh = await api(`/api/records/${id}`);
+      $("#matchArea").innerHTML = !res.configured ? `<p class="muted">Discogs isn't connected yet. Ask for a Discogs token to be added in Settings ⚙️.</p>`
+        : res.matches.length ? matchesHTML(res.matches, fresh)
+        : `<p class="muted">Discogs found nothing for that. Try fewer words, just the catalogue number, or paste the record's Discogs web address.</p>`;
+      bindMatches(id, true);
+    } catch (e) { $("#matchArea").innerHTML = ""; toast(e.message, true); }
+  };
+  $("#dqGo").addEventListener("click", typedSearch);
+  $("#dq").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); typedSearch(); } });
+
   $("#detailsForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     await saveDetails(id, owners);
@@ -966,11 +1051,12 @@ function matchesHTML(matches, rec) {
     </button>`).join("")}</div>`;
 }
 
-function bindMatches(id) {
+// typed = the list came from a search Pete typed himself, so Discogs' artist and title replace what the AI read.
+function bindMatches(id, typed = false) {
   $$(".match").forEach((b) => b.addEventListener("click", async () => {
     b.disabled = true;
     try {
-      const rec = await api(`/api/records/${id}/discogs-match`, { method: "POST", body: { release_id: b.dataset.release } });
+      const rec = await api(`/api/records/${id}/discogs-match`, { method: "POST", body: { release_id: b.dataset.release, overwrite: typed } });
       toast("Got it! I've filled in the details from Discogs.");
       const matches = $$(".match").map((m) => ({ id: m.dataset.release, title: m.querySelector("b").textContent, thumb: (m.querySelector("img") || {}).src, year: "", country: "", catno: "" }));
       paintDetails(id, rec, null, matches);
@@ -1037,7 +1123,7 @@ async function renderPrice(id) {
     <div class="panel">
       <h1>${esc(rec.artist)} — ${esc(rec.album_title)}</h1>
       <div class="value-tiles">
-        ${tile(rec.discogs_median, "Discogs price")}
+        ${tile(rec.discogs_median, rec.discogs_release_id ? "Discogs price" : "Discogs price (no pressing picked)")}
         ${tile(rec.popsike_median, "Popsike past auctions")}
         ${tile(rec.ebay_sold_average, "eBay recent sales")}
         ${tile(rec.ai_estimate, "Internet research")}
@@ -1053,6 +1139,7 @@ async function renderPrice(id) {
       <div class="row">
         <button class="btn btn-huge btn-green" id="toSell">Sell it ➜</button>
         <button class="btn btn-chrome" id="again">🔄 Check the price again</button>
+        <a class="btn btn-chrome" href="#/record/${id}/details">🔍 Wrong or no Discogs price? Pick the pressing</a>
         <span class="spacer"></span>
         <button class="btn btn-ghost" id="keep">Keep it in my collection</button>
       </div>
@@ -1219,7 +1306,7 @@ async function renderRecord(id) {
       <div class="panel">
         <div class="photos-big">${SLOTS.map((s) => rec.images[s.key]
           ? `<button data-photo="${esc(rec.images[s.key])}" title="Click to make bigger"><img src="${esc(rec.images[s.key])}" alt="${s.label}"></button>`
-          : `<button disabled><span class="none">No ${s.label.toLowerCase()}</span></button>`).join("")}
+          : (rec.images.back || rec.images.disc_a || rec.images.disc_b) ? `<button disabled><span class="none">No ${s.label.toLowerCase()}</span></button>` : "").join("")}
           ${(rec.extras || []).map((e) => `<button data-photo="${esc(e.url)}" title="Click to make bigger"><img src="${esc(e.url)}" alt="${esc(e.label)}"><span class="cap">${esc(e.label)}</span></button>`).join("")}</div>
         <div class="row" style="margin-top:16px"><a class="btn btn-chrome btn-small" href="#/record/${id}/photos">📷 Retake photos</a></div>
       </div>
